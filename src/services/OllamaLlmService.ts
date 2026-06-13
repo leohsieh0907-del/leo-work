@@ -8,7 +8,6 @@
 //  與 ClaudeService 方法簽名一致（皆實作 LlmService），server.ts 可互換。
 // ════════════════════════════════════════════════════════════════════
 
-import { z } from "zod";
 import {
   AppError,
   ErrorCode,
@@ -27,21 +26,25 @@ export interface OllamaLlmOptions {
 const DEFAULT_BASE_URL = "http://localhost:11434";
 const DEFAULT_MODEL = "qwen2.5:3b";
 
-// ─────────────── zod 結構驗證 ───────────────
+// ─────────────── 寬鬆解析輔助（本地小模型輸出不一定嚴謹）───────────────
 
-const ProactiveAnalysisSchema = z.object({
-  theme: z.string(),
-  key_summary: z.array(z.string()),
-  historical_conflicts: z.array(z.string()),
-});
+/** 任意值轉乾淨字串陣列：陣列→逐項轉字串；字串→單元素；其它→空陣列。 */
+function toStrArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter((s) => s.length > 0);
+  if (typeof v === "string" && v.trim()) return [v.trim()];
+  return [];
+}
 
-const ActionItemArraySchema = z.array(
-  z.object({
-    task: z.string(),
-    assignee: z.string(),
-    deadline: z.string(),
-  }),
-);
+/** 從解析結果取出「項目陣列」：本身是陣列就用；是物件就找第一個陣列屬性（如 items）。 */
+function pickArray(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") {
+    const obj = parsed as Record<string, unknown>;
+    if (Array.isArray(obj.items)) return obj.items;
+    for (const v of Object.values(obj)) if (Array.isArray(v)) return v;
+  }
+  return [];
+}
 
 /** zh/en/ja/ko → 語言全名；非預期值預設繁中。 */
 function languageName(code: string): string {
@@ -152,11 +155,14 @@ export class OllamaLlmService implements LlmService {
     historicalContext: string,
   ): Promise<ProactiveAnalysis> {
     const system =
-      "你是專業的會議分析助理。請同時閱讀「當前會議逐字稿」與「歷史會議背景」，做橫向比對分析，" +
-      "並主動指出與歷史的衝突點（例如：歷史記錄客戶要 A 功能，今天卻要求 B 功能）。\n" +
-      "只輸出一個 JSON 物件，結構嚴格為：\n" +
-      '{"theme": "一句話會議主題", "key_summary": ["重點1","重點2"], "historical_conflicts": ["衝突描述1"]}\n' +
-      "無衝突時 historical_conflicts 給空陣列 []。除了這個 JSON 外不要輸出任何其他文字。";
+      "你是專業的會議分析助理。只能根據下方提供的『當前會議逐字稿』的實際內容做分析，" +
+      "所有結論都必須有逐字稿依據，嚴禁虛構、嚴禁照抄本說明裡的字。\n" +
+      "輸出一個 JSON 物件，三個欄位：\n" +
+      "- theme：用一句話總結這場會議在談什麼（反映逐字稿真實內容）。\n" +
+      "- key_summary：字串陣列，逐字稿中的關鍵決定與討論重點，每點一句、要具體。\n" +
+      "- historical_conflicts：字串陣列，『當前逐字稿』與『歷史會議背景』明顯不一致之處；" +
+      "若沒有歷史背景或找不到不一致，一律給空陣列 []。\n" +
+      "只輸出這個 JSON 物件，不要輸出任何其他文字。";
 
     const user =
       "=== 當前會議逐字稿 ===\n" +
@@ -166,35 +172,40 @@ export class OllamaLlmService implements LlmService {
 
     const raw = await this.chat(system, user, true);
     const parsed = parseJsonLoose(raw);
-    const result = ProactiveAnalysisSchema.safeParse(parsed);
-    if (!result.success) {
-      throw new AppError(ErrorCode.CLAUDE_BAD_JSON, "本地模型回傳的分析 JSON 格式不正確", {
-        issues: result.error.issues,
-        raw,
-      });
-    }
-    return result.data;
+    const obj =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    // 寬鬆組裝：本地小模型偶爾把陣列寫成字串或漏欄位，這裡一律安全轉型。
+    return {
+      theme: String(obj.theme ?? "").trim() || "（未能產生主題）",
+      key_summary: toStrArray(obj.key_summary),
+      historical_conflicts: toStrArray(obj.historical_conflicts),
+    };
   }
 
   async extractActionItems(transcript: string): Promise<ActionItem[]> {
     const system =
-      `今天日期：${todayString()}。\n` +
-      "你是專業的會議助理。請從逐字稿中精準提取待辦事項，深度理解語意（不要只抓關鍵字）。\n" +
-      "每項需含：task（任務內容）、assignee（負責人，語意不明填「未指定」）、" +
-      "deadline（截止日；把「下週五/三天後/月底前」等相對時間，依今天日期換算成具體 YYYY-MM-DD；無法判斷填「未指定」）。\n" +
-      '只輸出一個 JSON 陣列，結構嚴格為：[{"task":"","assignee":"","deadline":""}]。無待辦時輸出 []。' +
-      "除了這個 JSON 陣列外不要輸出任何其他文字。";
+      `今天是 ${todayString()}。你是會議助理，負責從逐字稿抽出「要有人去執行的待辦/行動項」。\n` +
+      "判斷原則：只要有人被指派、或會中決定『某人要做某事』『某事要在某時間前完成』，就是一筆待辦。\n" +
+      "每筆需有 task（要做什麼，具體）、assignee（誰負責，沒明講就寫 未指定）、" +
+      "deadline（什麼時候前完成；把『下週五』『月底前』『三天後』依今天日期換算成 YYYY-MM-DD，沒提到就寫 未指定）。\n" +
+      // 用物件包一層 items：Ollama 的 JSON 模式對「物件」比「裸陣列」穩定得多（小模型常把裸陣列回成 {}）。
+      '輸出 JSON 物件：{"items":[{"task":"...","assignee":"...","deadline":"..."}]}。' +
+      "逐字稿真的完全沒有任何人要做的事，才給空 items。只輸出這個 JSON 物件，不要其他文字。";
 
-    const raw = await this.chat(system, transcript, true);
-    const parsed = parseJsonLoose(raw);
-    const result = ActionItemArraySchema.safeParse(parsed);
-    if (!result.success) {
-      throw new AppError(ErrorCode.CLAUDE_BAD_JSON, "本地模型回傳的行動方針 JSON 格式不正確", {
-        issues: result.error.issues,
-        raw,
-      });
-    }
-    return result.data;
+    const user = "會議逐字稿如下，請逐句找出所有待辦/行動項：\n\n" + transcript;
+    const raw = await this.chat(system, user, true);
+    const arr = pickArray(parseJsonLoose(raw));
+    // 寬鬆組裝：逐項安全轉型、補預設、丟掉沒有 task 的雜訊，永不硬性 throw。
+    return arr
+      .filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null)
+      .map((x) => ({
+        task: String(x.task ?? "").trim(),
+        assignee: String(x.assignee ?? "未指定").trim() || "未指定",
+        deadline: String(x.deadline ?? "未指定").trim() || "未指定",
+      }))
+      .filter((a) => a.task.length > 0);
   }
 
   async translateWithTimestamps(transcript: string, targetLanguage: string): Promise<string> {

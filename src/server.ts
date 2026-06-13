@@ -18,6 +18,7 @@ import { EmbeddingService } from "./services/EmbeddingService";
 import { VectorStore } from "./services/VectorStore";
 import { ClaudeService } from "./services/ClaudeService";
 import { OllamaLlmService } from "./services/OllamaLlmService";
+import { GeminiLlmService } from "./services/GeminiLlmService";
 import type { LlmService } from "./services/llm/types";
 import { SystemAudioCapture } from "./services/audio/SystemAudioCapture";
 import { PhoneBridgeServer } from "./services/audio/PhoneBridgeServer";
@@ -73,18 +74,29 @@ const embedding = new EmbeddingService({
 });
 const vectorStore = new VectorStore({ dbPath: DB_PATH, embedding });
 
-// LLM：預設本地 Ollama（$0、離線、無需任何金鑰）；只有明確設定 LLM_PROVIDER=claude
-// 才實例化 ClaudeService 並要求 ANTHROPIC_API_KEY。
-const llm: LlmService =
-  LLM_PROVIDER === "claude"
-    ? new ClaudeService({
-        apiKey: required("ANTHROPIC_API_KEY"),
-        model: process.env.ANTHROPIC_MODEL,
-      })
-    : new OllamaLlmService({
-        baseUrl: process.env.OLLAMA_BASE_URL,
-        model: process.env.OLLAMA_LLM_MODEL,
-      });
+// LLM 來源：
+//   ollama（預設）= 本地、$0、離線、無需金鑰
+//   gemini        = 雲端、有免費額度、不吃 GPU、品質好（需 GEMINI_API_KEY）
+//   claude        = 雲端、品質最佳、付費（需 ANTHROPIC_API_KEY）
+function buildLlm(): LlmService {
+  if (LLM_PROVIDER === "claude") {
+    return new ClaudeService({
+      apiKey: required("ANTHROPIC_API_KEY"),
+      model: process.env.ANTHROPIC_MODEL,
+    });
+  }
+  if (LLM_PROVIDER === "gemini") {
+    return new GeminiLlmService({
+      apiKey: required("GEMINI_API_KEY"),
+      model: process.env.GEMINI_MODEL,
+    });
+  }
+  return new OllamaLlmService({
+    baseUrl: process.env.OLLAMA_BASE_URL,
+    model: process.env.OLLAMA_LLM_MODEL,
+  });
+}
+const llm: LlmService = buildLlm();
 
 // ─────────────── 雙源收音引擎 ───────────────
 
