@@ -12,6 +12,7 @@ import cors from "cors";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { SecurityManager } from "./services/SecurityManager";
+import { MeetingStore } from "./services/MeetingStore";
 import { AudioRepair } from "./services/AudioRepair";
 import { TextSplitter } from "./services/TextSplitter";
 import { EmbeddingService } from "./services/EmbeddingService";
@@ -40,6 +41,7 @@ import {
   type IngestRequest,
   type QueryRequest,
   type TranslateRequest,
+  type SavedMeeting,
 } from "./shared/types";
 
 // ─────────────── 環境設定 ───────────────
@@ -64,6 +66,7 @@ function required(name: string): string {
 // ─────────────── 服務實例化 ───────────────
 
 const security = new SecurityManager(SALT);
+const meetingStore = new MeetingStore(security, SALT, path.resolve("data"));
 const audioRepair = new AudioRepair();
 const splitter = new TextSplitter({ chunkSize: 300, overlap: 50 });
 const embedding = new EmbeddingService({
@@ -295,6 +298,43 @@ app.post(
     }
     const transcript = await geminiStt.transcribeAudio(audio, mimeType ?? "audio/wav");
     res.json({ transcript });
+  }),
+);
+
+// ─────────────── 會議存檔 / 歷史 ───────────────
+
+app.get(
+  "/meetings",
+  wrap(async (_req, res) => {
+    res.json({ meetings: await meetingStore.list() });
+  }),
+);
+
+app.post(
+  "/meetings",
+  wrap(async (req, res) => {
+    const meeting = req.body as SavedMeeting;
+    if (!meeting?.id || typeof meeting.transcript !== "string") {
+      throw new AppError(ErrorCode.INVALID_INPUT, "meeting 需含 id 與 transcript");
+    }
+    const item = await meetingStore.save(meeting);
+    res.json({ item });
+  }),
+);
+
+app.get(
+  "/meetings/:id",
+  wrap(async (req, res) => {
+    const meeting = await meetingStore.load(req.params.id);
+    res.json({ meeting });
+  }),
+);
+
+app.delete(
+  "/meetings/:id",
+  wrap(async (req, res) => {
+    await meetingStore.remove(req.params.id);
+    res.json({ ok: true });
   }),
 );
 

@@ -9,6 +9,8 @@ import type {
   IngestRequest,
   QueryRequest,
   TranslateRequest,
+  SavedMeeting,
+  MeetingListItem,
 } from "../shared/types";
 
 // sidecar 監聽位址（對應 .env 的 SIDECAR_PORT；前端固定走本機回環）
@@ -66,6 +68,32 @@ export function translate(req: TranslateRequest): Promise<{ translated: string }
 /** 語音轉文字：上傳錄音（base64 WAV）→ 帶時間戳記逐字稿。 */
 export function transcribe(req: { audio: string; mimeType: string }): Promise<{ transcript: string }> {
   return post("/transcribe", req);
+}
+
+/** 會議存檔（加密落地，同 id 覆蓋）。 */
+export function saveMeeting(meeting: SavedMeeting): Promise<{ item: MeetingListItem }> {
+  return post("/meetings", meeting);
+}
+
+/** 歷史列表。 */
+export async function listMeetings(): Promise<{ meetings: MeetingListItem[] }> {
+  const r = await fetch(`${BASE}/meetings`);
+  if (!r.ok) throw new Error(`讀取歷史失敗（${r.status}）`);
+  return (await r.json()) as { meetings: MeetingListItem[] };
+}
+
+/** 讀回一場會議。 */
+export async function loadMeeting(id: string): Promise<{ meeting: SavedMeeting }> {
+  const r = await fetch(`${BASE}/meetings/${encodeURIComponent(id)}`);
+  if (!r.ok) throw new Error(`載入會議失敗（${r.status}）`);
+  return (await r.json()) as { meeting: SavedMeeting };
+}
+
+/** 刪除一場會議。 */
+export async function deleteMeeting(id: string): Promise<{ ok: true }> {
+  const r = await fetch(`${BASE}/meetings/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(`刪除會議失敗（${r.status}）`);
+  return (await r.json()) as { ok: true };
 }
 
 /** 加密保存一段文字（逐字稿/摘要）到本機。 */

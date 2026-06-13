@@ -71,6 +71,29 @@ export type TargetLanguage = "zh" | "en" | "ja" | "ko";
 /** 嵌入來源切換。 */
 export type EmbeddingProvider = "local" | "openai" | "ollama";
 
+// ─────────────── 會議存檔 ───────────────
+
+/** 一場已存檔的完整會議（加密落地）。 */
+export interface SavedMeeting {
+  id: string;
+  title: string;
+  /** 會議日期 ISO8601 */
+  date: string;
+  transcript: string;
+  analysis: ProactiveAnalysis | null;
+  actionItems: ActionItem[];
+  /** 存檔時間 ISO8601 */
+  savedAt: string;
+}
+
+/** 歷史列表項目（中繼資料；不含逐字稿內容）。 */
+export interface MeetingListItem {
+  id: string;
+  title: string;
+  date: string;
+  savedAt: string;
+}
+
 // ─────────────── 結構化錯誤 ───────────────
 
 /** 跨模組統一錯誤代碼（前端可據此顯示對應提示）。 */
