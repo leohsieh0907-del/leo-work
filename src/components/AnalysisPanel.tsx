@@ -1,6 +1,7 @@
 // ── 主動式分析結果面板 ──
-// 渲染：會議主題、關鍵討論摘要、⚠️ 歷史衝突點（醒目）、行動方針表格。
+// 渲染：會議主題、關鍵討論摘要、⚠️ 歷史衝突點、行動方針表格；可複製/匯出 Markdown。
 
+import { useState } from "react";
 import type { ActionItem, ProactiveAnalysis } from "../shared/types";
 
 interface AnalysisPanelProps {
@@ -10,16 +11,54 @@ interface AnalysisPanelProps {
   loading: boolean;
 }
 
+/** 把分析結果組成 Markdown 會議記錄。 */
+function toMarkdown(a: ProactiveAnalysis, items: ActionItem[]): string {
+  const out: string[] = ["# 會議記錄", "", "## 會議主題", a.theme || "（無）", "", "## 關鍵討論摘要"];
+  if (a.key_summary.length) a.key_summary.forEach((s) => out.push(`- ${s}`));
+  else out.push("（無）");
+  out.push("", "## 歷史衝突點");
+  if (a.historical_conflicts.length) a.historical_conflicts.forEach((c) => out.push(`- ⚠️ ${c}`));
+  else out.push("（未發現衝突）");
+  out.push("", "## 行動方針");
+  if (items.length) {
+    out.push("| 任務 | 負責人 | 截止日 |", "|---|---|---|");
+    items.forEach((it) => out.push(`| ${it.task} | ${it.assignee} | ${it.deadline} |`));
+  } else {
+    out.push("（無）");
+  }
+  return out.join("\n");
+}
+
 export default function AnalysisPanel({
   analysis,
   actionItems,
   historicalContext,
   loading,
 }: AnalysisPanelProps) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    if (!analysis) return;
+    await navigator.clipboard.writeText(toMarkdown(analysis, actionItems));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+
+  function handleDownload() {
+    if (!analysis) return;
+    const blob = new Blob([toMarkdown(analysis, actionItems)], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `會議記錄-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) {
     return (
       <section className="flex h-full items-center justify-center text-sm text-slate-400">
-        Claude 分析中…（橫向比對歷史背景）
+        AI 分析中…（橫向比對歷史背景）
       </section>
     );
   }
@@ -34,6 +73,22 @@ export default function AnalysisPanel({
 
   return (
     <section className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
+      {/* 匯出列 */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={handleCopy}
+          className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10"
+        >
+          {copied ? "✓ 已複製" : "📋 複製"}
+        </button>
+        <button
+          onClick={handleDownload}
+          className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10"
+        >
+          ⬇ 匯出 .md
+        </button>
+      </div>
+
       {/* 會議主題 */}
       <div>
         <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">會議主題</h3>

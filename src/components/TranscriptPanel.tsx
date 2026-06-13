@@ -2,7 +2,7 @@
 // 一個大 textarea 讓使用者貼上 / 編輯帶 [mm:ss] 發言人: 的逐字稿，
 // 附「翻譯」按鈕與語言下拉；翻譯結果顯示於下方並保留排版。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { translate, transcribe } from "../lib/api";
 import { startRecording, stopRecording } from "../lib/recorder";
 import type { TargetLanguage } from "../shared/types";
@@ -27,6 +27,19 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
+
+  // 錄音計時器
+  useEffect(() => {
+    if (!recording) return;
+    setRecSeconds(0);
+    const t = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [recording]);
+
+  const recClock = `${String(Math.floor(recSeconds / 60)).padStart(2, "0")}:${String(
+    recSeconds % 60,
+  ).padStart(2, "0")}`;
 
   // 按一下開始錄音；再按一下停止 → 上傳給 Gemini 轉錄 → 結果接到逐字稿框。
   async function handleRecord() {
@@ -92,7 +105,7 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
             ) : recording ? (
               <>
                 <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white" />
-                停止並轉錄
+                停止並轉錄 {recClock}
               </>
             ) : (
               "🎙 錄音"
