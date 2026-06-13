@@ -1,0 +1,22 @@
+node_modules
+dist
+dist-sidecar
+
+# 機密
+.env
+.env.local
+
+# 本地加密資料 / 向量庫 / 模型快取（防拷：不進版控）
+/data
+/vault
+*.enc
+.cache
+.transformers-cache
+
+# Rust / Tauri
+src-tauri/target
+src-tauri/gen/schemas
+
+# 系統
+.DS_Store
+*.log

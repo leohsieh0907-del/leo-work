@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  @apply bg-brand-dark text-slate-100 antialiased;
+}
+.mono {
+  @apply font-mono text-sm leading-relaxed;
+}
