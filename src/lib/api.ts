@@ -63,6 +63,11 @@ export function translate(req: TranslateRequest): Promise<{ translated: string }
   return post("/translate", req);
 }
 
+/** 語音轉文字：上傳錄音（base64 WAV）→ 帶時間戳記逐字稿。 */
+export function transcribe(req: { audio: string; mimeType: string }): Promise<{ transcript: string }> {
+  return post("/transcribe", req);
+}
+
 /** 加密保存一段文字（逐字稿/摘要）到本機。 */
 export function vaultSave(req: {
   id: string;

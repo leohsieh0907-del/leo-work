@@ -98,6 +98,11 @@ function buildLlm(): LlmService {
 }
 const llm: LlmService = buildLlm();
 
+// 語音轉文字（STT）：用 Gemini 直接聽錄音音訊（需 GEMINI_API_KEY；與 LLM_PROVIDER 無關）。
+const geminiStt = process.env.GEMINI_API_KEY
+  ? new GeminiLlmService({ apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_MODEL })
+  : null;
+
 // ─────────────── 雙源收音引擎 ───────────────
 
 // /events 的 WebSocket 連線集合（前端訂閱 VU / 狀態 / 即時逐字稿）
@@ -182,7 +187,7 @@ async function runBatchSummary(fileId: string, data: Buffer): Promise<void> {
 
 const app = express();
 app.use(cors({ origin: ["http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost"] }));
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "50mb" })); // 容納錄音音訊的 base64（16kHz mono WAV 約 42KB/秒）
 
 // 包裝 async route，集中錯誤處理
 const wrap =
@@ -276,6 +281,20 @@ app.post(
 
     const payload: AnalyzeResponse = { analysis, actionItems, historicalContext };
     res.json(payload);
+  }),
+);
+
+// 語音轉文字：瀏覽器錄音（base64 WAV）→ Gemini 轉錄成帶時間戳記逐字稿
+app.post(
+  "/transcribe",
+  wrap(async (req, res) => {
+    const { audio, mimeType } = req.body as { audio?: string; mimeType?: string };
+    if (!audio) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 audio（base64）");
+    if (!geminiStt) {
+      throw new AppError(ErrorCode.CONFIG_MISSING, "語音轉錄需要 GEMINI_API_KEY，請於 .env 設定");
+    }
+    const transcript = await geminiStt.transcribeAudio(audio, mimeType ?? "audio/wav");
+    res.json({ transcript });
   }),
 );
 

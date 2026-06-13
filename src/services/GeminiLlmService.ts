@@ -202,6 +202,58 @@ export class GeminiLlmService implements LlmService {
     const raw = await this.generate(system, transcript);
     return raw.trim();
   }
+
+  /** 把錄音音訊直接轉錄成帶時間戳記的繁體中文逐字稿（Gemini 聽音訊）。 */
+  async transcribeAudio(audioBase64: string, mimeType: string): Promise<string> {
+    const system =
+      "你是專業的會議錄音轉錄員。把音訊逐字轉錄成繁體中文，每句獨立一行，" +
+      "格式固定為 `[mm:ss] 發言人: 內容`（mm:ss 為該句在錄音中的大約時間）。" +
+      "盡量區分不同發言人（標 發言人1、發言人2…）；無法區分時統一標 發言人。" +
+      "只輸出逐字稿本身，不要任何說明或前言。";
+    const url = `${API_BASE}/${this.model}:generateContent?key=${this.apiKey}`;
+    const body = {
+      system_instruction: { parts: [{ text: system }] },
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inline_data: { mime_type: mimeType, data: audioBase64 } },
+            { text: "請逐字轉錄這段錄音。" },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0.1 },
+    };
+
+    let resp: Response;
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        `無法連線到 Gemini API：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    const data = (await resp.json().catch(() => null)) as
+      | { candidates?: { content?: { parts?: { text?: string }[] } }[]; error?: { message?: string } }
+      | null;
+    if (!resp.ok) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        `Gemini 轉錄錯誤：${data?.error?.message ?? `HTTP ${resp.status}`}`,
+      );
+    }
+    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    if (!text) {
+      throw new AppError(ErrorCode.CLAUDE_API_ERROR, "Gemini 轉錄回應為空（音訊太短或格式不支援）");
+    }
+    return text.trim();
+  }
 }
 
 /** 安全解析成物件（responseSchema 下通常已是乾淨 JSON；仍防呆）。 */

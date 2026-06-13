@@ -3,7 +3,8 @@
 // 附「翻譯」按鈕與語言下拉；翻譯結果顯示於下方並保留排版。
 
 import { useState } from "react";
-import { translate } from "../lib/api";
+import { translate, transcribe } from "../lib/api";
+import { startRecording, stopRecording } from "../lib/recorder";
 import type { TargetLanguage } from "../shared/types";
 
 interface TranscriptPanelProps {
@@ -24,6 +25,34 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
   const [translated, setTranslated] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+
+  // 按一下開始錄音；再按一下停止 → 上傳給 Gemini 轉錄 → 結果接到逐字稿框。
+  async function handleRecord() {
+    setError(null);
+    if (!recording) {
+      try {
+        await startRecording();
+        setRecording(true);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "無法開始錄音");
+      }
+      return;
+    }
+    setRecording(false);
+    setTranscribing(true);
+    try {
+      const { base64, mimeType } = await stopRecording();
+      const r = await transcribe({ audio: base64, mimeType });
+      const text = r.transcript.trim();
+      onChange(value.trim() ? value.trimEnd() + "\n" + text : text);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "轉錄失敗");
+    } finally {
+      setTranscribing(false);
+    }
+  }
 
   async function handleTranslate() {
     if (!value.trim()) {
@@ -47,7 +76,29 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
     <section className="flex h-full flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">會議逐字稿</h2>
-        <span className="text-xs text-slate-500">格式：[mm:ss] 發言人: 內容</span>
+        <div className="flex items-center gap-2">
+          <span className="hidden text-xs text-slate-500 lg:inline">格式：[mm:ss] 發言人: 內容</span>
+          <button
+            onClick={handleRecord}
+            disabled={transcribing}
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
+              recording
+                ? "bg-brand-danger text-white"
+                : "bg-brand-accent text-brand-dark hover:opacity-90"
+            }`}
+          >
+            {transcribing ? (
+              "轉錄中…"
+            ) : recording ? (
+              <>
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white" />
+                停止並轉錄
+              </>
+            ) : (
+              "🎙 錄音"
+            )}
+          </button>
+        </div>
       </div>
 
       <textarea
