@@ -15,6 +15,7 @@ import {
   ErrorCode,
   type ProactiveAnalysis,
   type ActionItem,
+  type ChatTurn,
 } from "../shared/types";
 import type { LlmService } from "./llm/types";
 
@@ -253,6 +254,62 @@ export class GeminiLlmService implements LlmService {
       throw new AppError(ErrorCode.CLAUDE_API_ERROR, "Gemini 轉錄回應為空（音訊太短或格式不支援）");
     }
     return text.trim();
+  }
+
+  /**
+   * AI 助理對話：結合「當前會議逐字稿 + 相關歷史記憶 + 對話脈絡」自然回答。
+   */
+  async chat(
+    question: string,
+    currentTranscript: string,
+    memoryContext: string,
+    history: ChatTurn[],
+  ): Promise<string> {
+    const system =
+      "你是會議 AI 助理。請根據下方的『當前會議逐字稿』與『相關歷史記憶』，用繁體中文自然、扼要地回答使用者的問題。\n" +
+      "原則：有依據才回答，沒有依據就老實說「目前資料看不出來」，不要編造；可整理重點、列待辦、做比較。\n\n" +
+      "=== 當前會議逐字稿 ===\n" +
+      (currentTranscript.trim() || "（尚無逐字稿）") +
+      "\n\n=== 相關歷史記憶 ===\n" +
+      (memoryContext.trim() || "（無相關歷史）");
+
+    const contents = [
+      ...history.slice(-8).map((h) => ({
+        role: h.role === "assistant" ? "model" : "user",
+        parts: [{ text: h.text }],
+      })),
+      { role: "user", parts: [{ text: question }] },
+    ];
+
+    const url = `${API_BASE}/${this.model}:generateContent?key=${this.apiKey}`;
+    let resp: Response;
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          contents,
+          generationConfig: { temperature: 0.3 },
+        }),
+      });
+    } catch (e) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        `無法連線到 Gemini API：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    const data = (await resp.json().catch(() => null)) as
+      | { candidates?: { content?: { parts?: { text?: string }[] } }[]; error?: { message?: string } }
+      | null;
+    if (!resp.ok) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        `Gemini 對話錯誤：${data?.error?.message ?? `HTTP ${resp.status}`}`,
+      );
+    }
+    const answer = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    return answer.trim() || "（沒有產生回覆，請換個方式問問看）";
   }
 }
 

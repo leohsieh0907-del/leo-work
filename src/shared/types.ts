@@ -94,6 +94,12 @@ export interface MeetingListItem {
   savedAt: string;
 }
 
+/** AI 助理聊天的一輪對話。 */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 // ─────────────── 結構化錯誤 ───────────────
 
 /** 跨模組統一錯誤代碼（前端可據此顯示對應提示）。 */

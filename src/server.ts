@@ -42,6 +42,7 @@ import {
   type QueryRequest,
   type TranslateRequest,
   type SavedMeeting,
+  type ChatTurn,
 } from "./shared/types";
 
 // ─────────────── 環境設定 ───────────────
@@ -298,6 +299,25 @@ app.post(
     }
     const transcript = await geminiStt.transcribeAudio(audio, mimeType ?? "audio/wav");
     res.json({ transcript });
+  }),
+);
+
+// AI 助理對話：結合當前逐字稿 + 跨會議記憶自然回答
+app.post(
+  "/chat",
+  wrap(async (req, res) => {
+    const { question, transcript, history } = req.body as {
+      question?: string;
+      transcript?: string;
+      history?: ChatTurn[];
+    };
+    if (!question) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 question");
+    if (!geminiStt) {
+      throw new AppError(ErrorCode.CONFIG_MISSING, "AI 助理需要 GEMINI_API_KEY，請於 .env 設定");
+    }
+    const memory = await vectorStore.queryHistoricalContext(question, 3).catch(() => "");
+    const answer = await geminiStt.chat(question, transcript ?? "", memory, history ?? []);
+    res.json({ answer });
   }),
 );
 

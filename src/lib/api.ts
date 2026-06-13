@@ -11,6 +11,7 @@ import type {
   TranslateRequest,
   SavedMeeting,
   MeetingListItem,
+  ChatTurn,
 } from "../shared/types";
 
 // sidecar 監聽位址（對應 .env 的 SIDECAR_PORT；前端固定走本機回環）
@@ -68,6 +69,15 @@ export function translate(req: TranslateRequest): Promise<{ translated: string }
 /** 語音轉文字：上傳錄音（base64 WAV）→ 帶時間戳記逐字稿。 */
 export function transcribe(req: { audio: string; mimeType: string }): Promise<{ transcript: string }> {
   return post("/transcribe", req);
+}
+
+/** AI 助理對話（結合當前逐字稿 + 跨會議記憶）。 */
+export function chat(req: {
+  question: string;
+  transcript: string;
+  history: ChatTurn[];
+}): Promise<{ answer: string }> {
+  return post("/chat", req);
 }
 
 /** 會議存檔（加密落地，同 id 覆蓋）。 */

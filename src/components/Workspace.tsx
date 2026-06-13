@@ -15,7 +15,7 @@ import type {
 import HistoryRail from "./HistoryRail";
 import TranscriptPanel from "./TranscriptPanel";
 import AnalysisPanel from "./AnalysisPanel";
-import MemorySearch from "./MemorySearch";
+import ChatAssistant from "./ChatAssistant";
 
 /** 把 [mm:ss] 解析成秒數；非法格式回傳 null。 */
 function parseTimestamp(mmss: string): number | null {
@@ -251,9 +251,9 @@ export default function Workspace() {
           </div>
         </div>
 
-        {/* 底部：跨會議記憶檢索 */}
-        <div className="rounded-lg border border-white/10 bg-brand-panel/40 p-4">
-          <MemorySearch />
+        {/* 底部：AI 助理聊天（問當前會議 + 跨會議記憶）*/}
+        <div className="h-72 shrink-0 rounded-lg border border-white/10 bg-brand-panel/40 p-4">
+          <ChatAssistant transcript={transcript} />
         </div>
       </div>
     </div>
