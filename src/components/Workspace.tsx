@@ -86,6 +86,7 @@ export default function Workspace() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0); // +1 觸發歷史欄重抓
+  const [chatOpen, setChatOpen] = useState(false); // AI 助理預設收起，讓逐字稿有空間
 
   async function handleAnalyze() {
     if (!transcript.trim()) {
@@ -251,10 +252,21 @@ export default function Workspace() {
           </div>
         </div>
 
-        {/* 底部：AI 助理聊天（問當前會議 + 跨會議記憶）*/}
-        <div className="h-72 shrink-0 rounded-lg border border-white/10 bg-brand-panel/40 p-4">
-          <ChatAssistant transcript={transcript} />
-        </div>
+        {/* 底部：AI 助理（可收合，預設收起讓逐字稿有空間）*/}
+        {chatOpen ? (
+          <div className="h-72 shrink-0 rounded-lg border border-white/10 bg-brand-panel/40 p-4">
+            <ChatAssistant transcript={transcript} onCollapse={() => setChatOpen(false)} />
+          </div>
+        ) : (
+          <button
+            onClick={() => setChatOpen(true)}
+            className="flex shrink-0 items-center gap-2 rounded-lg border border-white/10 bg-brand-panel/40 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-brand-panel/60"
+          >
+            <span className="text-lg">🦉</span>
+            <span className="font-medium">AI 助理</span>
+            <span className="text-xs text-slate-500">— 點開問當前會議 ＋ 跨會議記憶</span>
+          </button>
+        )}
       </div>
     </div>
   );

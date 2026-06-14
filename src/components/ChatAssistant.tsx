@@ -11,7 +11,13 @@ const SUGGESTIONS = [
   "這場會議跟過去有沒有衝突？",
 ];
 
-export default function ChatAssistant({ transcript }: { transcript: string }) {
+export default function ChatAssistant({
+  transcript,
+  onCollapse,
+}: {
+  transcript: string;
+  onCollapse?: () => void;
+}) {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,14 +55,24 @@ export default function ChatAssistant({ transcript }: { transcript: string }) {
         <span className="text-lg">🦉</span>
         <h2 className="text-sm font-semibold text-slate-200">AI 助理</h2>
         <span className="text-xs text-slate-500">問當前會議 ＋ 跨會議記憶</span>
-        {messages.length > 0 && (
-          <button
-            onClick={() => setMessages([])}
-            className="ml-auto text-xs text-slate-500 hover:text-slate-300"
-          >
-            清空
-          </button>
-        )}
+        <div className="ml-auto flex items-center gap-3">
+          {messages.length > 0 && (
+            <button
+              onClick={() => setMessages([])}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
+              清空
+            </button>
+          )}
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
+              ▾ 收起
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-brand-dark/40 p-3">
