@@ -40,7 +40,7 @@
 proactor-recorder/
 ├── src/                          # 前端 webview（React）
 │   ├── App.tsx / main.tsx
-│   ├── components/               # Workspace / TranscriptPanel / AnalysisPanel / MemorySearch
+│   ├── components/               # Workspace / HistoryRail / TranscriptPanel / AnalysisPanel / ChatAssistant
 │   ├── lib/api.ts                # → sidecar 的型別化 HTTP 客戶端
 │   └── shared/types.ts           # 前後端共用型別契約
 ├── src/server.ts                 # Node sidecar：把服務包成 HTTP API
@@ -74,6 +74,36 @@ proactor-recorder/
 
 ---
 
+## 會議工作流：錄音 → 逐字稿 → AI 助理
+
+逐字稿面板（`TranscriptPanel.tsx`）的一條龍流程。**需設定 `GEMINI_API_KEY`**（語音與對話走 Google Gemini，有免費額度、不吃 GPU、中文強）。
+
+### 1) 錄音與逐字稿（混合式即時轉錄）
+- 按 **🎙 錄音**：瀏覽器 `getUserMedia` 收音（`src/lib/recorder.ts`），不靠 FFmpeg/dshow。
+- **錄音中（即時粗稿）**：同一份音源以 16kHz PCM 經 `ws://127.0.0.1:8765/live` 串流給 sidecar，由 `GeminiLiveService.ts` 轉接 **Gemini Live API**（`inputAudioTranscription`），邊講邊出字，顯示在「🔴 即時粗稿」框。
+- **按停止（整檔精修）**：對完整錄音呼叫 `/transcribe`（`GeminiLlmService.transcribeAudio`），用乾淨、帶 `[mm:ss] 發言人:`、正確標點/發言人的版本**覆蓋粗稿**並落地。
+- 即時粗稿是 STT 原始輸出（可能簡體、字間空格，顯示時已收掉空格）；**最終品質以精修版為準**。
+- **15 分鐘 session 上限**：upstream 關閉而本端仍錄音時，`GeminiLiveService` 自動重連續錄，空窗期音訊先緩衝、`setupComplete` 後補送。
+
+> 為何用「混合式」而非每分鐘切塊：切塊會切爛斷句、發言人標籤跨塊錯亂、時間戳誤差累積。串流即時稿 + 停止後整檔精修，兼得即時感與最終品質。
+
+### 2) 轉錄語言（精修版輸出）
+逐字稿面板右上下拉，控制停止後精修版的輸出語言：
+
+| 選項 | 行為 |
+|---|---|
+| 自動（預設） | 用原始說話語言；**非中文句在後面用全形括號附繁中翻譯**（英文會議 → 英文逐字稿＋中譯） |
+| 一律繁中 | 不論原語言都轉繁體中文 |
+| 一律英文 | 一律轉英文 |
+
+### 3) AI 助理聊天
+底部「🦉 AI 助理」面板（`ChatAssistant.tsx`，可收合，預設收起讓逐字稿有完整高度）：對話式問當前逐字稿，並結合**跨會議記憶**（向量檢索）回答；走 `/chat`（`GeminiLlmService.chat`），記得多輪對話脈絡。
+
+### 4) 翻譯
+逐字稿可一鍵翻譯成 en / ja / ko / zh，保留 `[mm:ss] 發言人:` 格式（`/translate`）。
+
+---
+
 ## 快速開始
 
 ```powershell
@@ -95,12 +125,15 @@ npm run dev          # concurrently 同時起 vite(1420) 與 sidecar(8765)
 ```
 
 ### 環境變數（`.env`）
-- `LLM_PROVIDER`：`ollama`（**預設、免費、離線**）/ `claude`（選配、付費）
+- `LLM_PROVIDER`：`ollama`（免費、離線）/ `gemini`（雲端、有免費額度、不吃 GPU、中文強）/ `claude`（付費）
 - `OLLAMA_LLM_MODEL`：預設 `qwen2.5:3b`（無 GPU 友善）
 - `ENCRYPTION_SALT`：金鑰推導 salt（**請改成隨機長字串；變更後舊加密檔無法解密**）
 - `LOCAL_DB_PATH`：LanceDB 路徑（預設 `./data/lancedb`）
 - `EMBEDDING_PROVIDER`：`local`（預設、離線）/ `openai` / `ollama`
 - `SIDECAR_PORT`：預設 `8765`
+- `GEMINI_API_KEY`：**錄音轉錄 / 即時逐字稿 / AI 助理對話所需**（Google AI Studio 申請，有免費額度；與 `LLM_PROVIDER` 無關，這三項功能固定走 Gemini）
+- `GEMINI_MODEL`：對話 / 分析 / 整檔轉錄模型，預設 `gemini-2.5-flash`
+- `GEMINI_LIVE_MODEL`：即時逐字稿用的 Live 模型，預設 `gemini-3.1-flash-live-preview`（只支援 AUDIO 輸出，逐字稿走 `inputAudioTranscription`）
 - `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`：**只有 `LLM_PROVIDER=claude` 才需要**（Claude API 逐 token 計費；Claude Max 訂閱不涵蓋 API）
 
 ---
