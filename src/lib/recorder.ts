@@ -9,13 +9,20 @@ let processor: ScriptProcessorNode | null = null;
 let mute: GainNode | null = null;
 let chunks: Float32Array[] = [];
 let inputSampleRate = 48000;
+let liveWs: WebSocket | null = null;
+
+const LIVE_WS_URL = "ws://127.0.0.1:8765/live";
 
 export function isRecording(): boolean {
   return stream !== null;
 }
 
-/** 開始錄音。權限被拒 / 無裝置會丟出清楚的繁中錯誤。 */
-export async function startRecording(): Promise<void> {
+/**
+ * 開始錄音。權限被拒 / 無裝置會丟出清楚的繁中錯誤。
+ * 傳入 onLiveText 即啟用「即時粗稿」：錄音中同步把音訊串流給 sidecar 轉接 Gemini Live，
+ * 邊講邊回傳文字。停止後仍會用整檔做精修轉錄（見 stopRecording）。
+ */
+export async function startRecording(opts?: { onLiveText?: (text: string) => void }): Promise<void> {
   if (stream) throw new Error("已在錄音中");
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -36,17 +43,54 @@ export async function startRecording(): Promise<void> {
   mute = audioCtx.createGain();
   mute.gain.value = 0;
   chunks = [];
+
+  if (opts?.onLiveText) openLive(opts.onLiveText);
+
   processor.onaudioprocess = (ev) => {
-    chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+    const block = new Float32Array(ev.inputBuffer.getChannelData(0));
+    chunks.push(block); // 累積供停止後整檔精修
+    if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+      liveWs.send(floatToPcm16le(resampleTo16k(block, inputSampleRate))); // 即時粗稿串流
+    }
   };
   source.connect(processor);
   processor.connect(mute);
   mute.connect(audioCtx.destination);
 }
 
+/** 開即時逐字稿的 WebSocket；失敗不影響錄音與最終轉錄（粗稿只是加值）。 */
+function openLive(onText: (text: string) => void): void {
+  try {
+    liveWs = new WebSocket(LIVE_WS_URL);
+    liveWs.binaryType = "arraybuffer";
+    liveWs.onmessage = (ev) => {
+      if (typeof ev.data !== "string") return;
+      try {
+        const m = JSON.parse(ev.data) as { type?: string; text?: string };
+        if (m.type === "text" && m.text) onText(m.text);
+      } catch {
+        /* 忽略非預期訊息 */
+      }
+    };
+    liveWs.onerror = () => {
+      /* 即時稿失敗就靜默放棄，停止後仍有整檔精修 */
+    };
+  } catch {
+    liveWs = null;
+  }
+}
+
 /** 停止錄音，回傳 16kHz 單聲道 WAV 的 base64。 */
 export async function stopRecording(): Promise<{ base64: string; mimeType: string; durationSec: number }> {
   if (!stream || !audioCtx) throw new Error("尚未開始錄音");
+  if (liveWs) {
+    try {
+      liveWs.close();
+    } catch {
+      /* ignore */
+    }
+    liveWs = null;
+  }
   processor?.disconnect();
   mute?.disconnect();
   source?.disconnect();
@@ -98,6 +142,17 @@ function resampleTo16k(input: Float32Array, fromRate: number): Float32Array {
     out[i] = a + (b - a) * frac;
   }
   return out;
+}
+
+/** Float32(-1..1) → Int16LE PCM 原始位元組（即時串流用，無 WAV 標頭）。 */
+function floatToPcm16le(samples: Float32Array): ArrayBuffer {
+  const buf = new ArrayBuffer(samples.length * 2);
+  const view = new DataView(buf);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
 }
 
 /** Float32(-1..1) → 16-bit PCM WAV（含 44 byte 標頭）。 */

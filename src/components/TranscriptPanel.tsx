@@ -12,6 +12,13 @@ interface TranscriptPanelProps {
   onChange: (v: string) => void;
 }
 
+/** 即時粗稿是 STT 原始輸出，中文字間常夾空白；顯示時收掉 CJK 字元之間的空白。 */
+const CJK = "\\u3000-\\u303f\\u3400-\\u9fff\\uff00-\\uffef";
+const CJK_GAP = new RegExp(`([${CJK}]) +(?=[${CJK}])`, "g");
+function tidyDraft(s: string): string {
+  return s.replace(CJK_GAP, "$1");
+}
+
 /** 翻譯目標語言選項（代碼 → 顯示名）。 */
 const LANGUAGES: { code: TargetLanguage; label: string }[] = [
   { code: "en", label: "English" },
@@ -28,6 +35,7 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
+  const [liveDraft, setLiveDraft] = useState(""); // 錄音中的即時粗稿（停止後由整檔精修取代）
 
   // 錄音計時器
   useEffect(() => {
@@ -46,7 +54,8 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
     setError(null);
     if (!recording) {
       try {
-        await startRecording();
+        setLiveDraft("");
+        await startRecording({ onLiveText: (t) => setLiveDraft((d) => d + t) });
         setRecording(true);
       } catch (e) {
         setError(e instanceof Error ? e.message : "無法開始錄音");
@@ -60,6 +69,7 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
       const r = await transcribe({ audio: base64, mimeType });
       const text = r.transcript.trim();
       onChange(value.trim() ? value.trimEnd() + "\n" + text : text);
+      setLiveDraft(""); // 精修版已落地，清掉即時粗稿
     } catch (e) {
       setError(e instanceof Error ? e.message : "轉錄失敗");
     } finally {
@@ -121,6 +131,18 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
         spellCheck={false}
         className="min-h-[200px] flex-1 resize-none rounded-lg border border-white/10 bg-brand-dark/60 p-3 font-mono text-sm leading-relaxed text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand"
       />
+
+      {(recording || transcribing) && (
+        <div className="rounded-lg border border-brand-danger/30 bg-brand-danger/5 p-3">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-brand-danger">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-danger" />
+            即時粗稿{transcribing ? "（精修中…即將取代）" : "（停止後自動精修取代）"}
+          </div>
+          <p className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-300">
+            {liveDraft ? tidyDraft(liveDraft) : "聆聽中…開始說話就會看到文字"}
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <select

@@ -20,6 +20,7 @@ import { VectorStore } from "./services/VectorStore";
 import { ClaudeService } from "./services/ClaudeService";
 import { OllamaLlmService } from "./services/OllamaLlmService";
 import { GeminiLlmService } from "./services/GeminiLlmService";
+import { GeminiLiveService } from "./services/GeminiLiveService";
 import type { LlmService } from "./services/llm/types";
 import { SystemAudioCapture } from "./services/audio/SystemAudioCapture";
 import { PhoneBridgeServer } from "./services/audio/PhoneBridgeServer";
@@ -517,9 +518,25 @@ async function main() {
 
   const server = http.createServer(app);
 
+  // 兩條 WebSocket 共用同一 http server，必須用 noServer + 手動依路徑分流；
+  // 否則兩個 WebSocketServer 各自掛 upgrade 監聽，不符路徑的那個會 abortHandshake 把
+  // 對方的連線砍掉（ws 的已知坑）。
+  const eventsWss = new WebSocketServer({ noServer: true });
+  const liveWss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (req, socket, head) => {
+    const pathname = (req.url ?? "").split("?")[0];
+    if (pathname === "/events") {
+      eventsWss.handleUpgrade(req, socket, head, (ws) => eventsWss.emit("connection", ws, req));
+    } else if (pathname === "/live") {
+      liveWss.handleUpgrade(req, socket, head, (ws) => liveWss.emit("connection", ws, req));
+    } else {
+      socket.destroy();
+    }
+  });
+
   // 前端訂閱即時事件（VU 訊號條 / 引擎狀態 / 即時逐字稿）的 WebSocket
-  const wss = new WebSocketServer({ server, path: "/events" });
-  wss.on("connection", (ws) => {
+  eventsWss.on("connection", (ws) => {
     eventClients.add(ws);
     // 一連上先推一次目前狀態
     ws.send(JSON.stringify({ type: "status", status: audioEngine.status() } satisfies AudioEvent));
@@ -527,9 +544,38 @@ async function main() {
     ws.on("error", () => eventClients.delete(ws));
   });
 
+  // 即時逐字稿（混合式）：瀏覽器串流 16kHz PCM → 本服務轉接 Gemini Live → 回傳 inputTranscription。
+  // 停止錄音後，前端仍會用 /transcribe 對整檔做一次精修轉錄覆蓋這份粗稿。
+  liveWss.on("connection", (ws) => {
+    if (!process.env.GEMINI_API_KEY) {
+      ws.send(JSON.stringify({ type: "error", message: "即時逐字稿需要 GEMINI_API_KEY" }));
+      ws.close();
+      return;
+    }
+    const live = new GeminiLiveService({
+      apiKey: process.env.GEMINI_API_KEY,
+      model: process.env.GEMINI_LIVE_MODEL,
+    });
+    live.start(
+      (text) => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "text", text }));
+      },
+      (message) => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "error", message }));
+      },
+    );
+    ws.on("message", (data, isBinary) => {
+      // 二進位幀 = Int16LE PCM @16kHz；轉 base64 後餵給 Gemini Live
+      if (isBinary) live.pushAudio((data as Buffer).toString("base64"));
+    });
+    ws.on("close", () => live.stop());
+    ws.on("error", () => live.stop());
+  });
+
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`[sidecar] 已啟動於 http://127.0.0.1:${PORT}（嵌入來源：${EMBED_PROVIDER}）`);
     console.log(`[sidecar] 事件 WebSocket：ws://127.0.0.1:${PORT}/events`);
+    console.log(`[sidecar] 即時逐字稿 WebSocket：ws://127.0.0.1:${PORT}/live`);
   });
 }
 
