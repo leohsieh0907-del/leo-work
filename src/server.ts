@@ -42,6 +42,7 @@ import {
   type IngestRequest,
   type QueryRequest,
   type TranslateRequest,
+  type TranscribeLang,
   type SavedMeeting,
   type ChatTurn,
 } from "./shared/types";
@@ -293,12 +294,16 @@ app.post(
 app.post(
   "/transcribe",
   wrap(async (req, res) => {
-    const { audio, mimeType } = req.body as { audio?: string; mimeType?: string };
+    const { audio, mimeType, lang } = req.body as {
+      audio?: string;
+      mimeType?: string;
+      lang?: TranscribeLang;
+    };
     if (!audio) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 audio（base64）");
     if (!geminiStt) {
       throw new AppError(ErrorCode.CONFIG_MISSING, "語音轉錄需要 GEMINI_API_KEY，請於 .env 設定");
     }
-    const transcript = await geminiStt.transcribeAudio(audio, mimeType ?? "audio/wav");
+    const transcript = await geminiStt.transcribeAudio(audio, mimeType ?? "audio/wav", lang ?? "auto");
     res.json({ transcript });
   }),
 );

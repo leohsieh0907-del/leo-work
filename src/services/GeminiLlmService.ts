@@ -204,13 +204,26 @@ export class GeminiLlmService implements LlmService {
     return raw.trim();
   }
 
-  /** 把錄音音訊直接轉錄成帶時間戳記的繁體中文逐字稿（Gemini 聽音訊）。 */
-  async transcribeAudio(audioBase64: string, mimeType: string): Promise<string> {
-    const system =
-      "你是專業的會議錄音轉錄員。把音訊逐字轉錄成繁體中文，每句獨立一行，" +
+  /** 把錄音音訊直接轉錄成帶時間戳記的逐字稿（Gemini 聽音訊）。lang 控制輸出語言。 */
+  async transcribeAudio(
+    audioBase64: string,
+    mimeType: string,
+    lang: "auto" | "zh" | "en" = "auto",
+  ): Promise<string> {
+    const base =
+      "你是專業的會議錄音轉錄員。每句獨立一行，" +
       "格式固定為 `[mm:ss] 發言人: 內容`（mm:ss 為該句在錄音中的大約時間）。" +
       "盡量區分不同發言人（標 發言人1、發言人2…）；無法區分時統一標 發言人。" +
       "只輸出逐字稿本身，不要任何說明或前言。";
+    const langRule =
+      lang === "zh"
+        ? "不論原本說什麼語言，一律轉錄成繁體中文。"
+        : lang === "en"
+          ? "Transcribe everything into English regardless of the spoken language."
+          : "用原始說話語言逐字轉錄（講中文用繁體中文、講英文用英文）。" +
+            "若某句不是中文，請在該句內容後面用全形括號附上繁體中文翻譯，" +
+            "例如 `[00:05] 發言人1: Let's ship it next week.（下週就上線。）`；講中文的句子不必加翻譯。";
+    const system = base + "\n" + langRule;
     const url = `${API_BASE}/${this.model}:generateContent?key=${this.apiKey}`;
     const body = {
       system_instruction: { parts: [{ text: system }] },

@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { translate, transcribe } from "../lib/api";
 import { startRecording, stopRecording } from "../lib/recorder";
-import type { TargetLanguage } from "../shared/types";
+import type { TargetLanguage, TranscribeLang } from "../shared/types";
 
 interface TranscriptPanelProps {
   value: string;
@@ -36,6 +36,7 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
   const [transcribing, setTranscribing] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [liveDraft, setLiveDraft] = useState(""); // 錄音中的即時粗稿（停止後由整檔精修取代）
+  const [transLang, setTransLang] = useState<TranscribeLang>("auto"); // 精修轉錄輸出語言
 
   // 錄音計時器
   useEffect(() => {
@@ -66,7 +67,7 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
     setTranscribing(true);
     try {
       const { base64, mimeType } = await stopRecording();
-      const r = await transcribe({ audio: base64, mimeType });
+      const r = await transcribe({ audio: base64, mimeType, lang: transLang });
       const text = r.transcript.trim();
       onChange(value.trim() ? value.trimEnd() + "\n" + text : text);
       setLiveDraft(""); // 精修版已落地，清掉即時粗稿
@@ -100,7 +101,17 @@ export default function TranscriptPanel({ value, onChange }: TranscriptPanelProp
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">會議逐字稿</h2>
         <div className="flex items-center gap-2">
-          <span className="hidden text-xs text-slate-500 lg:inline">格式：[mm:ss] 發言人: 內容</span>
+          <select
+            value={transLang}
+            onChange={(e) => setTransLang(e.target.value as TranscribeLang)}
+            disabled={recording || transcribing}
+            title="停止後精修轉錄的輸出語言"
+            className="rounded-md border border-white/10 bg-brand-panel px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-brand disabled:opacity-50"
+          >
+            <option value="auto">自動（原文，非中文附中譯）</option>
+            <option value="zh">一律繁中</option>
+            <option value="en">一律英文</option>
+          </select>
           <button
             onClick={handleRecord}
             disabled={transcribing}

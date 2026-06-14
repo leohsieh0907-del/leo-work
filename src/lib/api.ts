@@ -9,6 +9,7 @@ import type {
   IngestRequest,
   QueryRequest,
   TranslateRequest,
+  TranscribeLang,
   SavedMeeting,
   MeetingListItem,
   ChatTurn,
@@ -66,8 +67,12 @@ export function translate(req: TranslateRequest): Promise<{ translated: string }
   return post("/translate", req);
 }
 
-/** 語音轉文字：上傳錄音（base64 WAV）→ 帶時間戳記逐字稿。 */
-export function transcribe(req: { audio: string; mimeType: string }): Promise<{ transcript: string }> {
+/** 語音轉文字：上傳錄音（base64 WAV）→ 帶時間戳記逐字稿。lang 控制輸出語言。 */
+export function transcribe(req: {
+  audio: string;
+  mimeType: string;
+  lang?: TranscribeLang;
+}): Promise<{ transcript: string }> {
   return post("/transcribe", req);
 }
 

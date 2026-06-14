@@ -68,6 +68,9 @@ export interface ActionItem {
 /** 翻譯支援語言。 */
 export type TargetLanguage = "zh" | "en" | "ja" | "ko";
 
+/** 逐字稿轉錄語言：auto＝原文（非中文句附繁中翻譯）、zh＝一律繁中、en＝一律英文。 */
+export type TranscribeLang = "auto" | "zh" | "en";
+
 /** 嵌入來源切換。 */
 export type EmbeddingProvider = "local" | "openai" | "ollama";
 
