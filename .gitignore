@@ -20,3 +20,6 @@ src-tauri/gen/schemas
 # 系統
 .DS_Store
 *.log
+
+# Office 暫存 / 鎖檔
+~$*

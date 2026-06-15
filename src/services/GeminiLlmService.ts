@@ -220,7 +220,8 @@ export class GeminiLlmService implements LlmService {
         ? "不論原本說什麼語言，一律轉錄成繁體中文。"
         : lang === "en"
           ? "Transcribe everything into English regardless of the spoken language."
-          : "用原始說話語言逐字轉錄。**硬性規定：每一行只要原文不是中文，行尾就必須緊接全形括號的繁體中文翻譯（每一句都要，一句都不能漏）**。" +
+          : "用原始說話語言逐字轉錄。**中文一律輸出繁體（正體）字，絕不可輸出簡體字。**" +
+            "**硬性規定：每一行只要原文不是中文，行尾就必須緊接全形括號的繁體中文翻譯（每一句都要，一句都不能漏）**。" +
             "格式：`[mm:ss] 發言人: 原文（繁中翻譯）`，例如 `[00:05] 發言人1: Let's ship it next week.（下週就上線。）`。" +
             "原文已是中文的行不加括號。漏任何一句翻譯都算錯。";
     const system = base + "\n" + langRule;

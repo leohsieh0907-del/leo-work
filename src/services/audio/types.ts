@@ -25,7 +25,7 @@ export type {
 } from "../../shared/types";
 export { AudioSourceState } from "../../shared/types";
 
-import type { AudioSourceKind, AudioSourceId, SourcePriority } from "../../shared/types";
+import type { AudioSourceKind, AudioSourceId, SourcePriority, TranscriptSegment } from "../../shared/types";
 
 /** Whisper 期望的取樣率。 */
 export const TARGET_SAMPLE_RATE = 16_000;
@@ -39,6 +39,23 @@ export interface AudioChunk {
   /** 單聲道 16kHz PCM，值域 -1..1。 */
   samples: Float32Array;
   source: AudioSourceKind;
+}
+
+/**
+ * 轉寫器契約（router / 引擎只認此介面，不管底層是本地 whisper 還是雲端 Gemini）。
+ * `StreamingTranscriber`（whisper）與 `GeminiStreamingTranscriber`（Gemini Live）皆實作。
+ */
+export interface TranscriberLike {
+  /** 累積一塊正規化 PCM（不一定立即轉寫）。 */
+  push(chunk: AudioChunk): void;
+  /** 取出自上次以來的新逐字稿片段（無則回 []）。 */
+  flush(): Promise<TranscriptSegment[]>;
+  /** 清空累積狀態（換 session / 停止收音）。 */
+  reset(): void;
+  /** flush 視窗秒數（router 用來決定 flush 週期）；可省略。 */
+  readonly windowSec?: number;
+  /** 是否已正確設定可用；可省略（省略時視為啟用）。 */
+  readonly enabled?: boolean;
 }
 
 // ─────────────── 收音來源契約（採回呼注入，避免事件型別繁瑣）───────────────

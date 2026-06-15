@@ -26,13 +26,19 @@ import { SystemAudioCapture } from "./services/audio/SystemAudioCapture";
 import { PhoneBridgeServer } from "./services/audio/PhoneBridgeServer";
 import { Agc } from "./services/audio/Agc";
 import { StreamingTranscriber } from "./services/audio/StreamingTranscriber";
+import { GeminiStreamingTranscriber } from "./services/audio/GeminiStreamingTranscriber";
 import { AudioCaptureEngine } from "./services/audio/AudioCaptureEngine";
 import { WebRtcSoftwareSource } from "./services/audio/WebRtcSoftwareSource";
 import { BluetoothHardwareSource } from "./services/audio/BluetoothHardwareSource";
 import { NobleBleTransport } from "./services/audio/NobleBleTransport";
 import { CaptureSourceAdapter } from "./services/audio/CaptureSourceAdapter";
 import { AudioIngestionRouter } from "./services/audio/AudioIngestionRouter";
-import type { AudioEvent, AudioSourceKind, AudioSourceId } from "./services/audio/types";
+import type {
+  AudioEvent,
+  AudioSourceKind,
+  AudioSourceId,
+  TranscriberLike,
+} from "./services/audio/types";
 import {
   AppError,
   ErrorCode,
@@ -160,12 +166,28 @@ const bluetoothSource = new BluetoothHardwareSource({
 // 本機系統混音包成統一 AudioSource（LOCAL_RECORDING）
 const localSource = new CaptureSourceAdapter(systemCapture, "local");
 
+// 「手機收音」來源：重用已驗證的 WSS 手機橋接（PhoneBridgeServer，自簽 HTTPS+QR+token），
+// 以 CaptureSourceAdapter 包成 router 的即時源（沿用既有 sourceId "webrtc" 欄位）。
+// WebRtcSoftwareSource 仍保留並掛在 /webrtc 信令路由，作為未來「真 WebRTC」的備援接點。
+const phoneSource = new CaptureSourceAdapter(phoneBridge, "webrtc");
+
+// router 即時逐字稿來源：設了 whisper 用 whisper；否則有 GEMINI_API_KEY 就用 Gemini Live
+// 即時轉寫；兩者皆無則沿用（停用的）whisper（收音仍可，只是不出字）。
+const whisperReady = Boolean(process.env.WHISPER_BIN && process.env.WHISPER_MODEL_PATH);
+const routerTranscriber: TranscriberLike =
+  !whisperReady && process.env.GEMINI_API_KEY
+    ? new GeminiStreamingTranscriber({
+        apiKey: process.env.GEMINI_API_KEY,
+        model: process.env.GEMINI_LIVE_MODEL,
+      })
+    : transcriber;
+
 const audioRouter = new AudioIngestionRouter({
   bluetooth: bluetoothSource,
-  webrtc: webrtcSource,
+  webrtc: phoneSource,
   local: localSource,
   agc: new Agc(),
-  transcriber,
+  transcriber: routerTranscriber,
   onEvent: broadcast,
 });
 
@@ -461,6 +483,30 @@ app.post(
 app.get("/router/status", (_req, res) => {
   res.json({ status: audioRouter.status() });
 });
+
+// 把剛停止的「手機收音 / 電腦系統」整段錄音交 Gemini 整檔精修（繁體、時間戳、發言人），
+// 回乾淨逐字稿給前端帶入會議。即時粗稿只是預覽，這裡才是可存檔的精修版。
+app.post(
+  "/router/transcribe",
+  wrap(async (req, res) => {
+    const { lang } = req.body as { lang?: TranscribeLang };
+    if (!geminiStt) {
+      throw new AppError(ErrorCode.CONFIG_MISSING, "整檔精修需要 GEMINI_API_KEY，請於 .env 設定");
+    }
+    const wav = audioRouter.peekRecordingWav();
+    if (!wav) {
+      throw new AppError(ErrorCode.INVALID_INPUT, "沒有可精修的收音（請先用手機/電腦收音並按停止）");
+    }
+    const transcript = await geminiStt.transcribeAudio(
+      wav.toString("base64"),
+      "audio/wav",
+      lang ?? "auto",
+    );
+    // 只有精修成功才清空緩衝；失敗（限流/斷網）保留錄音讓使用者重試。
+    audioRouter.clearRecording();
+    res.json({ transcript });
+  }),
+);
 
 // WebRTC 信令：手機 offer → 回 answer
 app.post(

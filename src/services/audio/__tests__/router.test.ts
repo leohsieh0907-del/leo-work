@@ -433,3 +433,79 @@ describe("deactivate", () => {
     expect(router.status().state).toBe(AudioSourceState.DISCONNECTED);
   });
 });
+
+// ════════════════ 7) 整檔精修錄音緩衝 ════════════════
+
+/** 從 WAV Buffer 標頭讀 data 區的樣本數（dataSize / 2）。 */
+function wavSampleCount(wav: Buffer): number {
+  expect(wav.subarray(0, 4).toString("ascii")).toBe("RIFF");
+  expect(wav.subarray(8, 12).toString("ascii")).toBe("WAVE");
+  return wav.readUInt32LE(40) / 2; // Subchunk2Size / 2 bytes per sample
+}
+
+describe("整檔精修錄音緩衝", () => {
+  it("前景收音累積 PCM → deactivate 後 hasRecording、peekRecordingWav 樣本數正確", async () => {
+    const { router, local } = makeHarness();
+    await router.activate("local"); // local 不過 AudioSync，便於精算樣本數
+
+    local.emitData(squareChunk(0, 0.3, 256));
+    local.emitData(squareChunk(1, 0.3, 256));
+    expect(router.hasRecording()).toBe(true);
+
+    await router.deactivate();
+    const wav = router.peekRecordingWav();
+    expect(wav).not.toBeNull();
+    expect(wavSampleCount(wav as Buffer)).toBe(512); // 兩塊 256
+
+    // peek 不清空（精修失敗可重試）
+    expect(router.hasRecording()).toBe(true);
+    expect(router.peekRecordingWav()).not.toBeNull();
+
+    // clearRecording 才清空
+    router.clearRecording();
+    expect(router.hasRecording()).toBe(false);
+    expect(router.peekRecordingWav()).toBeNull();
+  });
+
+  it("deactivate 後發 recording 事件（ready + 秒數）", async () => {
+    const { router, local, events } = makeHarness();
+    await router.activate("local");
+    local.emitData(squareChunk(0, 0.3, 16_000)); // 1 秒 @16kHz
+    events.length = 0;
+
+    await router.deactivate();
+
+    const rec = events.find((e) => e.type === "recording");
+    expect(rec).toBeDefined();
+    if (rec && rec.type === "recording") {
+      expect(rec.ready).toBe(true);
+      expect(rec.seconds).toBe(1);
+      expect(rec.truncated).toBe(false);
+    }
+  });
+
+  it("換源視為新 session：清掉上一段錄音", async () => {
+    const { router, local, webrtc } = makeHarness();
+    await router.activate("local");
+    local.emitData(squareChunk(0, 0.3, 256));
+    expect(router.hasRecording()).toBe(true);
+
+    // 切到 webrtc：應重置錄音緩衝
+    await router.activate("webrtc");
+    expect(router.hasRecording()).toBe(false);
+
+    // 確認新源能繼續累積（webrtc seq 從 0 起，AudioSync 接受）
+    webrtc.emitData(squareChunk(0, 0.3, 256));
+    expect(router.hasRecording()).toBe(true);
+  });
+
+  it("非前景源（藍牙背景）發塊不進精修錄音", async () => {
+    const { router, bluetooth } = makeHarness();
+    await router.activate("webrtc");
+    await router.syncBluetooth();
+    router.clearRecording(); // 清掉 activate 後可能的殘留
+
+    bluetooth.emitData(squareChunk(0, 0.3, 256));
+    expect(router.hasRecording()).toBe(false);
+  });
+});

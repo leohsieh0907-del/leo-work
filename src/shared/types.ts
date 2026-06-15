@@ -279,6 +279,8 @@ export type AudioEvent =
   | { type: "status"; status: AudioEngineStatus }
   | { type: "transcript"; segments: { start: number; end: number; text: string }[] }
   | { type: "error"; message: string }
+  // 收音整檔精修：前景 session 停止後，回報這段錄音是否可精修帶入會議
+  | { type: "recording"; ready: boolean; seconds: number; truncated: boolean }
   // 雙軌路由事件
   | { type: "router"; status: RouterStatus }
   | { type: "transfer"; sourceId: AudioSourceId; progress: number; done: boolean }

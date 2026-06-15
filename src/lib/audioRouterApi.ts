@@ -1,6 +1,6 @@
 // ── 前端 → sidecar 的雙軌路由控制（/router/* 與 /webrtc/*）──
 
-import type { AudioSourceId, RouterStatus } from "../shared/types";
+import type { AudioSourceId, RouterStatus, TranscribeLang } from "../shared/types";
 
 const BASE = "http://127.0.0.1:8765";
 
@@ -30,6 +30,13 @@ export function deactivateSource(): Promise<{ status: RouterStatus }> {
 /** 觸發藍牙背景同步（不搶前景即時串流）。 */
 export function syncBluetooth(): Promise<{ status: RouterStatus }> {
   return jsonPost("/router/sync-bluetooth", {});
+}
+
+/** 把剛停止的收音整段交 Gemini 整檔精修，回乾淨逐字稿（帶入會議用）。 */
+export function transcribeRouterRecording(
+  lang: TranscribeLang,
+): Promise<{ transcript: string }> {
+  return jsonPost("/router/transcribe", { lang });
 }
 
 /** WebRTC 信令：送 offer 拿 answer。 */

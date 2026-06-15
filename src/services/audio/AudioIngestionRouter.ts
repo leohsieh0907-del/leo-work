@@ -35,17 +35,26 @@ import type {
   AudioSourceId,
   BluetoothTransferStatus,
   RouterStatus,
+  TranscriberLike,
   WebRtcStatus,
 } from "./types";
-import { AudioSourceState } from "./types";
+import { AudioSourceState, TARGET_SAMPLE_RATE } from "./types";
 import type { Agc } from "./Agc";
-import type { StreamingTranscriber } from "./StreamingTranscriber";
 import { AudioSync } from "./AudioSync";
 import { computeVu } from "./VuMeter";
 import { AsyncMutex } from "./AsyncMutex";
+import { encodeWavPcm16 } from "./WavEncoder";
 
 /** VU 事件節流間隔（毫秒）：每塊都算 VU，但最多每 100ms 推一次給前端訊號條。 */
 const VU_THROTTLE_MS = 100;
+
+/**
+ * 收音「整檔精修」緩衝上限（秒）。前景 session 期間累積 AGC 後的 PCM，停止後可編成
+ * WAV 交 Gemini 整檔精修。超過上限就停止累積（保護記憶體，並避免超出 Gemini inline
+ * 音訊大小限制）；超過時 recording 事件帶 truncated=true 提醒前端。
+ */
+const MAX_RECORD_SECONDS = 600;
+const MAX_RECORD_SAMPLES = MAX_RECORD_SECONDS * TARGET_SAMPLE_RATE;
 
 /**
  * 前景即時源 flush 轉寫器的週期上限（秒）。
@@ -60,15 +69,13 @@ const FLUSH_MAX_SEC = 2;
  */
 type WithBtStatus = AudioSource & { status?: () => BluetoothTransferStatus };
 type WithWebRtcStatus = AudioSource & { status?: () => WebRtcStatus };
-/** 轉寫器可能額外暴露的視窗秒數（StreamingTranscriber 有，假轉寫器可省略）。 */
-type TranscriberWithWindow = StreamingTranscriber & { windowSec?: number };
 
 export interface AudioRouterDeps {
   bluetooth: AudioSource;
   webrtc: AudioSource;
   local: AudioSource;
   agc: Agc;
-  transcriber?: StreamingTranscriber;
+  transcriber?: TranscriberLike;
   onEvent?: (e: AudioEvent) => void;
 }
 
@@ -96,6 +103,12 @@ export class AudioIngestionRouter {
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   /** 上次推送 VU 事件的時間戳（節流用）。 */
   private lastVuAt = 0;
+
+  /** 前景 session 累積的（AGC 後）PCM，停止後可編 WAV 做整檔精修。 */
+  private recordedChunks: Float32Array[] = [];
+  private recordedSamples = 0;
+  /** 是否因超過上限而截斷錄音（前端可據以提醒「只精修前 N 分鐘」）。 */
+  private recordingTruncated = false;
 
   /** 每個來源是否已綁定 onDataReceived/onError（避免重複註冊）。 */
   private readonly wiredSources = new WeakSet<AudioSource>();
@@ -138,6 +151,7 @@ export class AudioIngestionRouter {
         this.deps.bluetooth.setPriority("foreground");
       }
       this.emitRouter();
+      this.emitRecording(); // 通知前端這段收音是否可精修帶入會議（ready + 秒數）
     });
   }
 
@@ -187,6 +201,8 @@ export class AudioIngestionRouter {
     this.deps.agc.reset();
     this.deps.transcriber?.reset();
     this.lastVuAt = 0;
+    this.resetRecording(); // 新 session 重開精修錄音緩衝
+    this.emitRecording(); // 通知前端：尚無可精修的錄音（ready=false）
 
     // 設妥前景指標「之後」才 startStream——資料回呼一旦觸發就能正確認領該塊。
     this.foregroundId = id;
@@ -314,6 +330,65 @@ export class AudioIngestionRouter {
 
     // 餵轉寫器：沿用原 chunk 的 seq/timestamp，但換成增益處理後的樣本。
     this.deps.transcriber?.push({ ...chunk, samples: processed });
+
+    // 累積整檔錄音（停止後可編 WAV 交 Gemini 整檔精修，補足即時粗稿的不足）。
+    this.appendRecording(processed);
+  }
+
+  // ════════════════ 整檔精修錄音緩衝 ════════════════
+
+  /** 是否有可精修的錄音（前景 session 累積到的 PCM）。 */
+  hasRecording(): boolean {
+    return this.recordedSamples > 0;
+  }
+
+  /**
+   * 把累積錄音編成 WAV（16kHz mono），**不清空緩衝**；無錄音回 null。
+   * 不清空是刻意的：精修（送 Gemini）可能失敗（限流/斷網），保留緩衝才能重試，
+   * 不讓使用者整段收音因一次 API 失敗而白收。成功後由呼叫端 clearRecording()。
+   */
+  peekRecordingWav(): Buffer | null {
+    if (this.recordedSamples === 0) return null;
+    const merged = new Float32Array(this.recordedSamples);
+    let off = 0;
+    for (const c of this.recordedChunks) {
+      merged.set(c, off);
+      off += c.length;
+    }
+    return encodeWavPcm16(merged, TARGET_SAMPLE_RATE);
+  }
+
+  /** 清空錄音緩衝並通知前端（精修成功後呼叫）。 */
+  clearRecording(): void {
+    this.resetRecording();
+    this.emitRecording();
+  }
+
+  /** 累積一塊（AGC 後）PCM；超過上限就停止累積並標記截斷。 */
+  private appendRecording(samples: Float32Array): void {
+    if (this.recordedSamples >= MAX_RECORD_SAMPLES) {
+      this.recordingTruncated = true;
+      return;
+    }
+    this.recordedChunks.push(samples);
+    this.recordedSamples += samples.length;
+  }
+
+  /** 清空錄音緩衝（新 session 或取走後）。 */
+  private resetRecording(): void {
+    this.recordedChunks = [];
+    this.recordedSamples = 0;
+    this.recordingTruncated = false;
+  }
+
+  /** 推一次「錄音可精修狀態」事件（ready / 秒數 / 是否截斷）給前端。 */
+  private emitRecording(): void {
+    this.emit({
+      type: "recording",
+      ready: this.hasRecording(),
+      seconds: Math.round(this.recordedSamples / TARGET_SAMPLE_RATE),
+      truncated: this.recordingTruncated,
+    });
   }
 
   // ════════════════ 轉寫 flush ════════════════
@@ -359,8 +434,7 @@ export class AudioIngestionRouter {
    * 若轉寫器 windowSec 更小（更頻繁）則以它為準。
    */
   private resolveFlushSec(): number {
-    const t = this.deps.transcriber as TranscriberWithWindow | undefined;
-    const w = t?.windowSec;
+    const w = this.deps.transcriber?.windowSec;
     if (typeof w === "number" && w > 0) {
       return Math.min(w, FLUSH_MAX_SEC);
     }

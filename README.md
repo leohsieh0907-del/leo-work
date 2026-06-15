@@ -29,7 +29,7 @@
 | 加密 | node `crypto` AES-256-GCM + scrypt 金鑰推導 |
 | 向量庫 | LanceDB（嵌入式，本地落地） |
 | 嵌入 | `@xenova/transformers` ONNX `all-MiniLM-L6-v2`（離線；可切 OpenAI / Ollama） |
-| LLM（摘要/分析/翻譯） | **本地 Ollama**（預設 `qwen2.5:3b`，$0、離線）；可選 `@anthropic-ai/sdk` Claude（付費） |
+| LLM（摘要/分析/翻譯） | 三選一（`LLM_PROVIDER`）：**Gemini**（現用預設、雲端免費額度、中文強）/ 本地 Ollama（程式內建 fallback、$0 離線）/ Claude（付費）。**轉錄／即時逐字稿／AI 助理對話固定走 Gemini**（需 `GEMINI_API_KEY`） |
 | 音訊修復 | `fluent-ffmpeg` + `ffmpeg-static` |
 
 ---
@@ -50,7 +50,8 @@ proactor-recorder/
 │   ├── TextSplitter.ts           # 階段二：滑動視窗切片
 │   ├── EmbeddingService.ts       # 階段二：本地 ONNX 嵌入
 │   ├── VectorStore.ts            # 階段二：LanceDB 向量檢索
-│   ├── OllamaLlmService.ts       # 階段三（預設）：本地 LLM 分析 / 行動方針 / 翻譯（$0）
+│   ├── GeminiLlmService.ts       # 階段三（現用預設）：分析/翻譯 + 整檔轉錄 + AI 助理對話
+│   ├── OllamaLlmService.ts       # 階段三：本地 LLM 分析 / 翻譯（$0 離線；程式內建 fallback）
 │   ├── ClaudeService.ts          # 階段三（選配）：Claude API 版本（付費）
 │   └── __tests__/                # 可實跑的單元測試
 ├── src-tauri/                    # Tauri 外殼（Rust，極簡）
@@ -69,7 +70,7 @@ proactor-recorder/
 |---|---|---|
 | 一 | AES-256-GCM 加密存儲（IV + AuthTag 防篡改）、記憶體歸零防 dump、FFmpeg 容錯、結構化錯誤碼 | `SecurityManager.ts`、`AudioRepair.ts`、`shared/types.ts`(ErrorCode) |
 | 二 | LanceDB 全局記憶、滑動視窗切片（300/50、附時間戳+會議來源）、餘弦相似度跨會議檢索 | `TextSplitter.ts`、`EmbeddingService.ts`、`VectorStore.ts` |
-| 三 | 主動式分析（橫向比對歷史衝突、嚴格 JSON）、行動方針（任務/負責人/截止日，相對日期換算）、保時間戳翻譯 | `OllamaLlmService.ts`（預設、本地免費）/ `ClaudeService.ts`（選配） |
+| 三 | 主動式分析（橫向比對歷史衝突、嚴格 JSON）、行動方針（任務/負責人/截止日，相對日期換算）、保時間戳翻譯 | `GeminiLlmService.ts`（現用預設）/ `OllamaLlmService.ts`（離線免費）/ `ClaudeService.ts`（付費選配） |
 | 四 | 完整專案結構、`package.json`、`.env.example` | （本專案整體） |
 
 ---
@@ -194,6 +195,11 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 | 路由協調 | `AudioIngestionRouter.ts` + `AsyncMutex.ts` | 四態狀態機 + **優先權**（WebRTC 串流時藍牙降背景低優先，不掉幀）+ 非同步鎖防並發雙寫 |
 | 前端狀態 | `store/audioStore.ts`(**Zustand**) + `RouterPanel.tsx` | `AudioSourceState` 四態、三源切換、藍牙進度條、VU、即時逐字稿 |
 
+> **目前面板接線（重要）**：掛在 App 的 `RouterPanel` 三來源為 **🖥️ 電腦系統 / 📱 手機收音 / 🔵 藍牙同步**。
+> - **📱 手機收音** 走上方「雙源收音」那套**已測試的 WSS 手機橋接**（`PhoneBridgeServer`，自簽 HTTPS + QR + token），**不是 WebRTC**；點選後面板顯示 QR 供手機掃描（以 `CaptureSourceAdapter(phoneBridge,"webrtc")` 接進 router）。`WebRtcSoftwareSource` 與 `/webrtc/*` 信令**保留**為未來「真 WebRTC」備援接點。
+> - **即時逐字稿來源**：設了 `WHISPER_BIN`/`WHISPER_MODEL_PATH` → 本地 whisper（`StreamingTranscriber`）；否則有 `GEMINI_API_KEY` → **Gemini Live**（`GeminiStreamingTranscriber`）即時出粗稿。兩者皆無才不出字 → 所以**電腦系統／手機收音不裝 whisper 也能看到逐字稿**。
+> - **停止後整檔精修帶入會議**：對「電腦系統 / 手機收音」按停止後，工作區會出現「✨ 精修並帶入會議」（`POST /router/transcribe`）——把整段收音（router 累積的 AGC 後 PCM 編成 WAV）交 Gemini 整檔精修成乾淨繁體稿（含 `[mm:ss]` 與發言人）填入會議逐字稿，再 💾 存檔 / 分析。即時粗稿（可能簡體/語言漂移）只是預覽，**精修版才是可存檔的最終稿**。精修失敗（限流/斷網）會保留錄音供重試，不會白收。
+
 ### 關鍵現實（已在程式中誠實處理）
 - **`bluer` 是 Linux 專用** → 不用；BLE 走 Node `noble`，且因其為原生套件、Windows 安裝易失敗，改成 **`BleTransport` 介面 + 動態 import**（缺席給明確錯誤，不拖垮 install/typecheck）。
 - **PM01-9 的藍牙 GATT 協定為裝置私有** → 續傳邏輯與裝置解耦（自定 framing），UUID 走 env 佔位，標為整合點。
@@ -204,15 +210,16 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 
 - ✅ 前端型別檢查 `tsc -p tsconfig.json` → exit 0
 - ✅ Sidecar 型別檢查 `tsc -p tsconfig.sidecar.json` → exit 0
-- ✅ 單元 / 整合測試 `vitest run` → **84/84 通過**，含：
-  - 雙軌：重組佇列(6)、Router 四態+優先權+AsyncMutex(19)、斷點續傳含斷線重連 RESUME/逾時(14)
+- ✅ 單元 / 整合測試 `vitest run` → **95/95 通過**，含：
+  - 雙軌：重組佇列(6)、Router 四態+優先權+AsyncMutex+整檔精修錄音緩衝(23)、斷點續傳含斷線重連 RESUME/逾時(14)
+  - **Gemini 即時轉寫器（注入假 Live 後端）(7)**：lazy 開 session、PCM→base64、flush 成 segment、CJK 空格收尾、reset 重開、無金鑰 no-op
   - 加密 round-trip、錯誤金鑰、竄改偵測（6）
   - 滑動視窗切片重疊 / 時間回填（6）
   - WAV 編碼標頭 / clamp（5）
   - AGC 增益收斂 / 不削波、VU、同步去重補位、引擎協調（25）
   - **手機橋接整合測試（3）**：真起 WSS server、Token 驗證、二進位幀解析、錯誤 token 拒絕
 - ✅ 前端打包 `vite build` → exit 0
-- ✅ 改名 Leo work + LLM 改本地 Ollama 後重跑：型別檢查 ×2、84/84、build 仍全綠
+- ✅ 改名 Leo work + LLM 改 Gemini 預設後重跑：型別檢查 ×2、vitest 全綠、build 仍全綠
 - ⏳ Tauri 外殼編譯：需 Rust + MSVC（本機未裝）。重服務都在 Node sidecar，桌面外殼僅薄薄一層。
 - ⏳ 系統混音 / 手機端 / Whisper / Ollama 的「實機」行為需有 loopback 裝置 / 實體手機 / whisper 執行檔 / 已啟動的 Ollama 才能跑（純邏輯已測；外部相依部分為執行期）。
 
@@ -221,6 +228,7 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 ## 已知限制 / 後續
 
 - **Whisper 轉寫**：已透過雙源收音的 `StreamingTranscriber.ts` 接上（spawn whisper.cpp 執行檔，路徑走 `WHISPER_BIN`/`WHISPER_MODEL_PATH`；未設定則略過不報錯）。產出的逐字稿經 `/events` 即時推給前端，亦可接進 `/ingest` 建立跨會議記憶。需自備 whisper.cpp 執行檔與 ggml 模型。
+  - **未裝 whisper 時的替代**：若有 `GEMINI_API_KEY`，router 自動改用 `GeminiStreamingTranscriber`（Gemini Live）即時出粗稿 → 電腦系統／手機收音不裝 whisper 也能看到逐字稿（雲端、需網路；屬即時粗稿，非整檔精修）。
 - **正式版 sidecar 打包**：`npm run build:sidecar` 產出 `server.cjs`；要隨 Tauri 打包，需將其（連同 node 或用 `pkg`/`bun --compile` 包成單一執行檔）設為 Tauri `externalBin` 並於 `lib.rs` 以 shell plugin spawn。目前 dev 由 `concurrently` 啟動。
 - 首次使用 `local` 嵌入會自動下載 all-MiniLM 模型到本地快取（之後離線）。
 - macOS 打包的 `icon.icns` 未附；在 mac 上以 `npm run tauri icon` 產生。

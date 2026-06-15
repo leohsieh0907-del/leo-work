@@ -1,15 +1,17 @@
-import { useEffect } from "react";
-import { AudioSourceState, type AudioSourceId } from "../shared/types";
+import { useEffect, useState } from "react";
+import { AudioSourceState, type AudioSourceId, type PhoneSession } from "../shared/types";
 import { useAudioStore } from "../store/audioStore";
+import { getPhoneSession } from "../lib/audioApi";
 import VuMeter from "./VuMeter";
 
 // ── 雙軌整合控制面板（AudioIngestionRouter）──
-// 四態狀態機 + 三來源切換（電腦系統 / 手機 WebRTC / 藍牙同步）+ VU + 藍牙進度 + 即時逐字稿。
+// 四態狀態機 + 三來源切換（電腦系統 / 手機收音 / 藍牙同步）+ VU + 藍牙進度 + 即時逐字稿。
+// 「手機收音」走已驗證的 WSS 手機橋接（自簽 HTTPS + QR），點選後顯示 QR 供手機掃描。
 
 const STATE_LABEL: Record<AudioSourceState, string> = {
   [AudioSourceState.DISCONNECTED]: "未連線",
   [AudioSourceState.BLUETOOTH_SYNCING]: "藍牙同步中",
-  [AudioSourceState.WEBRTC_STREAMING]: "WebRTC 即時串流",
+  [AudioSourceState.WEBRTC_STREAMING]: "手機收音中",
   [AudioSourceState.LOCAL_RECORDING]: "本機錄音中",
 };
 
@@ -22,7 +24,7 @@ const STATE_COLOR: Record<AudioSourceState, string> = {
 
 const SOURCES: { id: AudioSourceId; label: string }[] = [
   { id: "local", label: "🖥️ 電腦系統" },
-  { id: "webrtc", label: "📱 手機即時(WebRTC)" },
+  { id: "webrtc", label: "📱 手機收音" },
   { id: "bluetooth", label: "🔵 藍牙同步" },
 ];
 
@@ -30,12 +32,37 @@ export default function RouterPanel() {
   const { state, status, vu, transcript, error, busy, connect, activate, deactivate, syncBluetooth } =
     useAudioStore();
 
+  // 手機收音 QR session（手機掃描用）
+  const [phoneSession, setPhoneSession] = useState<PhoneSession | null>(null);
+  const [phoneSessionErr, setPhoneSessionErr] = useState<string | null>(null);
+
   // 掛載時連上 /events
   useEffect(() => connect(), [connect]);
 
   const active = status?.activeSourceId ?? null;
   const realtimeActive =
     state === AudioSourceState.WEBRTC_STREAMING || state === AudioSourceState.LOCAL_RECORDING;
+  const phoneActive = state === AudioSourceState.WEBRTC_STREAMING;
+
+  // 手機收音來源啟用時取 QR / token / 網址；停用時清掉。
+  useEffect(() => {
+    if (!phoneActive) {
+      setPhoneSession(null);
+      setPhoneSessionErr(null);
+      return;
+    }
+    let alive = true;
+    getPhoneSession()
+      .then((s) => {
+        if (alive) setPhoneSession(s);
+      })
+      .catch((e) => {
+        if (alive) setPhoneSessionErr(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [phoneActive]);
 
   function onSource(id: AudioSourceId) {
     if (id === "bluetooth") {
@@ -88,11 +115,30 @@ export default function RouterPanel() {
         </div>
       </div>
 
-      {/* WebRTC 即時通道狀態 */}
-      {state === AudioSourceState.WEBRTC_STREAMING && status && (
-        <div className="text-xs text-slate-400">
-          WebRTC：重組佇列深度 {status.webrtc.reorderQueueDepth}｜丟棄封包 {status.webrtc.droppedPackets}
-          ｜增益 {status.gain.toFixed(1)}×
+      {/* 手機收音：QR + 連線指引（手機掃描當無線麥克風）*/}
+      {phoneActive && (
+        <div className="flex flex-wrap items-center gap-4 rounded-md border border-white/10 bg-black/20 px-3 py-3">
+          {phoneSession ? (
+            <>
+              <img
+                src={phoneSession.qrDataUrl}
+                alt="手機收音 QR"
+                className="h-32 w-32 shrink-0 rounded bg-white p-1"
+              />
+              <div className="flex flex-col gap-1 text-xs text-slate-300">
+                <span className="text-sm font-medium text-slate-100">📱 用手機掃 QR 當無線麥克風</span>
+                <span>1. 手機與電腦連同一個 Wi-Fi，掃描左方 QR</span>
+                <span>2. 首次會跳「憑證不受信任」→ 選繼續前往（自簽憑證，正常）</span>
+                <span>3. 開頁後按「開始傳送」，聲音即時回傳並轉成逐字稿</span>
+                <span className="mt-1 break-all text-slate-500">{phoneSession.url}</span>
+                <span className="text-slate-500">手機開始傳送後，下方音量條會跳動、即時逐字稿會出現。</span>
+              </div>
+            </>
+          ) : phoneSessionErr ? (
+            <span className="text-xs text-brand-danger">取得手機連線資訊失敗：{phoneSessionErr}</span>
+          ) : (
+            <span className="text-xs text-slate-400">產生手機連線 QR 中…</span>
+          )}
         </div>
       )}
 

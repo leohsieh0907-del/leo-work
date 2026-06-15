@@ -9,8 +9,10 @@ import type {
   MeetingMeta,
   ProactiveAnalysis,
   SavedMeeting,
+  TranscribeLang,
   TranscriptSegment,
 } from "../shared/types";
+import { useAudioStore } from "../store/audioStore";
 
 import HistoryRail from "./HistoryRail";
 import TranscriptPanel from "./TranscriptPanel";
@@ -87,6 +89,25 @@ export default function Workspace() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0); // +1 觸發歷史欄重抓
   const [chatOpen, setChatOpen] = useState(false); // AI 助理預設收起，讓逐字稿有空間
+
+  // 手機/電腦收音停止後的「整檔精修帶入會議」
+  const { recordingReady, recordingSeconds, recordingTruncated, finalizing, finalizeRecording } =
+    useAudioStore();
+  const [routerLang, setRouterLang] = useState<TranscribeLang>("auto");
+  const [importError, setImportError] = useState<string | null>(null);
+
+  async function handleImportRecording() {
+    setImportError(null);
+    try {
+      const clean = await finalizeRecording(routerLang);
+      const text = clean.trim();
+      if (text) {
+        setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
+      }
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "精修失敗");
+    }
+  }
 
   async function handleAnalyze() {
     if (!transcript.trim()) {
@@ -233,6 +254,35 @@ export default function Workspace() {
           {saveMsg && <p className="w-full text-xs text-brand-accent">{saveMsg}</p>}
           {saveError && <p className="w-full text-xs text-brand-danger">{saveError}</p>}
         </div>
+
+        {/* 收音停止後：把整段錄音精修成乾淨稿並帶入會議逐字稿 */}
+        {(recordingReady || finalizing) && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-accent/40 bg-brand-accent/10 px-4 py-3">
+            <span className="text-sm text-slate-100">
+              📥 收音已結束{recordingSeconds > 0 ? `（約 ${recordingSeconds} 秒）` : ""}
+              {recordingTruncated ? "（超長，只精修前段）" : ""}— 整檔精修成乾淨稿帶入會議
+            </span>
+            <select
+              value={routerLang}
+              onChange={(e) => setRouterLang(e.target.value as TranscribeLang)}
+              disabled={finalizing}
+              title="精修轉錄的輸出語言"
+              className="rounded-md border border-white/10 bg-brand-panel px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-brand disabled:opacity-50"
+            >
+              <option value="auto">自動（原文，非中文附中譯）</option>
+              <option value="zh">一律繁中</option>
+              <option value="en">一律英文</option>
+            </select>
+            <button
+              onClick={handleImportRecording}
+              disabled={finalizing}
+              className="rounded-md bg-brand-accent px-4 py-1.5 text-sm font-semibold text-brand-dark transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {finalizing ? "精修中…" : "✨ 精修並帶入會議"}
+            </button>
+            {importError && <span className="w-full text-xs text-brand-danger">{importError}</span>}
+          </div>
+        )}
 
         {/* 主體：左逐字稿、右分析 */}
         <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-2">
