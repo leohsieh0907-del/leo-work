@@ -37,10 +37,10 @@
 ## 目錄結構
 
 ```
-proactor-recorder/
+Leo work/
 ├── src/                          # 前端 webview（React）
-│   ├── App.tsx / main.tsx
-│   ├── components/               # Workspace / HistoryRail / TranscriptPanel / AnalysisPanel / ChatAssistant
+│   ├── App.tsx / main.tsx        # 頂部分頁：工作區 / 🦉 記憶聊天
+│   ├── components/               # Workspace / HistoryRail / TranscriptPanel / AnalysisPanel / ChatAssistant / MemoryChat
 │   ├── lib/api.ts                # → sidecar 的型別化 HTTP 客戶端
 │   └── shared/types.ts           # 前後端共用型別契約
 ├── src/server.ts                 # Node sidecar：把服務包成 HTTP API
@@ -100,6 +100,11 @@ proactor-recorder/
 ### 3) AI 助理聊天
 底部「🦉 AI 助理」面板（`ChatAssistant.tsx`，可收合，預設收起讓逐字稿有完整高度）：對話式問當前逐字稿，並結合**跨會議記憶**（向量檢索）回答；走 `/chat`（`GeminiLlmService.chat`），記得多輪對話脈絡。
 
+### 5) 整頁「記憶聊天」（跨會議記憶）
+App 頂部分頁「🦉 記憶聊天」（`MemoryChat.tsx`，不掛 `RouterPanel`）：純跨會議記憶問答，**不綁當前會議**。
+- 空狀態＝歡迎 hero（標題「Leo work 可以幫您做些什麼？／您的記憶在內」+ 大圓角輸入框 + 11 張帶 icon/說明的建議卡）；有對話＝訊息串 + 底部輸入列，可「＋新對話」回首頁。
+- 與底部 AI 助理同走 `/chat`，差別是 `transcript:""`（無當前逐字稿、純向量檢索跨會議記憶）。
+
 ### 4) 翻譯
 逐字稿可一鍵翻譯成 en / ja / ko / zh，保留 `[mm:ss] 發言人:` 格式（`/translate`）。
 
@@ -133,7 +138,7 @@ npm run dev          # concurrently 同時起 vite(1420) 與 sidecar(8765)
 - `EMBEDDING_PROVIDER`：`local`（預設、離線）/ `openai` / `ollama`
 - `SIDECAR_PORT`：預設 `8765`
 - `GEMINI_API_KEY`：**錄音轉錄 / 即時逐字稿 / AI 助理對話所需**（Google AI Studio 申請，有免費額度；與 `LLM_PROVIDER` 無關，這三項功能固定走 Gemini）
-- `GEMINI_MODEL`：對話 / 分析 / 整檔轉錄模型，預設 `gemini-2.5-flash`
+- `GEMINI_MODEL`：對話 / 分析 / 整檔轉錄模型，程式碼預設常數 `gemini-2.5-flash`（目前 `.env` 為 `gemini-3.5-flash`）。**LLM 與 STT 共用此變數**——改它會一次換掉分析/翻譯＋轉錄/聊天
 - `GEMINI_LIVE_MODEL`：即時逐字稿用的 Live 模型，預設 `gemini-3.1-flash-live-preview`（只支援 AUDIO 輸出，逐字稿走 `inputAudioTranscription`）
 - `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`：**只有 `LLM_PROVIDER=claude` 才需要**（Claude API 逐 token 計費；Claude Max 訂閱不涵蓋 API）
 

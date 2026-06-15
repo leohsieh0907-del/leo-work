@@ -6,6 +6,36 @@
 
 ---
 
+## 2026-06-15（續4）— 新增整頁「記憶聊天」+ LLM 升 gemini-3.5-flash
+
+### 這段做了什麼
+1. **新功能：整頁「記憶聊天」（`src/components/MemoryChat.tsx` + `App.tsx` 分頁）**。庭晰拿客戶截圖（「Potor 可以幫您做些什麼？／您的記憶在內」+ 一排建議卡）問能否加。先確認三個方向：**整頁**（非升級底部小面板）、**照截圖 11 條提示詞原文**、**維持深色**。實作：
+   - 空狀態＝歡迎 hero（🦉 標題「Leo work 可以幫您做些什麼？」+ 副標「您的記憶在內」+ 大圓角輸入框 + 11 張帶 icon/說明的建議卡）；有對話＝訊息串 + 底部輸入列、可「＋新對話」回首頁。
+   - 走 `/chat` 但 `transcript:""`（無當前會議、純跨會議記憶，對應「您的記憶在內」）。
+   - `App.tsx` 頂部加「工作區 / 🦉 記憶聊天」分頁切換；記憶聊天分頁不掛 `RouterPanel`。
+   - 標題用現用產品名「Leo work」**不用**截圖舊名「Potor」（避免把死掉的名字加回來）。
+2. **模型升級：`GEMINI_MODEL` `gemini-2.5-flash` → `gemini-3.5-flash`**。先更正一個誤判：`/health` 回的 `provider:"local"` 是**嵌入模型**欄位，**不是 LLM**；`.env` 其實早就 `LLM_PROVIDER=gemini`，LLM 本來就是 Gemini。真正還「老」的只有本地嵌入 `all-MiniLM-L6-v2`。用 `GET /v1beta/models` 查金鑰可用清單→`gemini-3.5-flash` 實測 generateContent OK；`gemini-3-pro-preview` 回 **429（免費層額度）**，故選 flash（也避免 pro 拖慢轉錄）。
+3. **驗證全綠**：`typecheck` ×2 exit 0、`vite build` OK、`vitest` 95/95；重啟 sidecar 後 `/chat` 端到端實測通（回正常繁中）。
+4. **文件同步**：skill `proactor-recorder` 補 `MemoryChat`、`GEMINI_MODEL` 共用 LLM+STT 的雷、測試數 84→95、新增雷 #10（preview 截不到畫面 + 別用背景程序拉 dev）。
+
+### 關鍵決定 / 事實
+- **`GEMINI_MODEL` 同時被 LLM 實例與 `geminiStt`（轉錄/聊天）共用**——改它一次換掉分析+轉錄；要單獨把分析升 pro 得另拆 STT 模型，否則 pro 會拖慢/變貴整檔轉錄。免費層 pro-preview 實測 429。
+- **這次升級不花錢**：同一把金鑰、同為 flash 等級、免費層內 $0；沒做會花錢的兩件事（升 pro、嵌入換 OpenAI）。
+- **preview 瀏覽器連不到本機 sidecar(8765)**（只 tunnel vite 一個 port，實測 `Failed to fetch`），App 又把 UI 鎖在 health 之後 → **preview 截不到 live 畫面**（工具限制，非 bug）。改用 `show_widget` 出一張忠實深色 mock 給庭晰看；真畫面看自己機器 `localhost:1420`。
+- **又踩「背景程序拉 dev 會被回收」雷（續2 記過）**：我用 `run_in_background` 起的 dev 中途被殺（vite 被外部終止→`concurrently -k` 連收 sidecar），靠 `start-leo-work.bat` 獨立視窗那台撐住。教訓已寫進 skill 雷 #10：dev 一律用 bat、別靠對話。
+
+### 目前狀態
+- App 在 `localhost:1420` 跑（`start-leo-work.bat` 獨立視窗），sidecar 8765 健康，LLM=**gemini-3.5-flash**，`/chat` OK。
+- 記憶聊天功能 live、驗證全綠。
+- **未 commit**（本次純前端 + `.env`/skill/worklog，未碰加密/錢；庭晰未要求 commit）。
+
+### 待辦 / 下一步（未做）
+- （選）建議卡提示詞客製成貼合 Leo work 實際資料（目前照截圖原文，部分如「課程/學期/客服來電」點了 AI 會回查無）。
+- （選）嵌入模型 `all-MiniLM-L6-v2`（本地 384維）→ `text-embedding-3-small`（雲端 1536維，檢索更準）：需 `OPENAI_API_KEY` + **重建既有會議索引**（維度變了不相容），成本較高，待庭晰決定。
+- 本次變更未 commit；要進版控再說。
+
+---
+
 ## 2026-06-15（續3）— 自動模式強制繁體 + 釐清「手機收音→帶入會議」操作流程 + 首次 commit
 
 ### 這段做了什麼

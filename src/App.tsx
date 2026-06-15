@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { health } from "./lib/api";
 import Workspace from "./components/Workspace";
 import RouterPanel from "./components/RouterPanel";
+import MemoryChat from "./components/MemoryChat";
 
 // ── App 外殼：頂部狀態列 + 主工作區 ──
 // Workspace 由前端元件模組實作（逐字稿輸入、主動式分析、跨會議記憶檢索）。
 
 export default function App() {
   const [ready, setReady] = useState<boolean | null>(null);
+  const [view, setView] = useState<"workspace" | "memory">("workspace");
 
   // 啟動時輪詢 sidecar 是否就緒（Node 服務啟動需一點時間）
   useEffect(() => {
@@ -34,17 +36,45 @@ export default function App() {
             本地隱私 · 跨會議記憶
           </span>
         </div>
+
+        {ready && (
+          <div className="inline-flex rounded-lg border border-white/10 bg-black/30 p-0.5 text-sm">
+            <button
+              onClick={() => setView("workspace")}
+              className={`rounded-md px-3 py-1.5 transition ${
+                view === "workspace" ? "bg-brand text-white" : "text-slate-300 hover:text-white"
+              }`}
+            >
+              工作區
+            </button>
+            <button
+              onClick={() => setView("memory")}
+              className={`rounded-md px-3 py-1.5 transition ${
+                view === "memory" ? "bg-brand text-white" : "text-slate-300 hover:text-white"
+              }`}
+            >
+              🦉 記憶聊天
+            </button>
+          </div>
+        )}
+
         <StatusPill ready={ready} />
       </header>
 
       {ready ? (
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {/* 雙軌整合控制列（電腦系統 / 手機 WebRTC / 藍牙）+ 四態狀態 + VU */}
-          <RouterPanel />
+        view === "workspace" ? (
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* 雙軌整合控制列（電腦系統 / 手機 WebRTC / 藍牙）+ 四態狀態 + VU */}
+            <RouterPanel />
+            <main className="flex-1 overflow-hidden">
+              <Workspace />
+            </main>
+          </div>
+        ) : (
           <main className="flex-1 overflow-hidden">
-            <Workspace />
+            <MemoryChat />
           </main>
-        </div>
+        )
       ) : (
         <main className="flex flex-1 items-center justify-center text-sm text-slate-400">
           {ready === null ? "連線本機服務中…" : "本機服務未就緒，重試中…"}

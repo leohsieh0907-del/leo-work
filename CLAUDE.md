@@ -28,7 +28,7 @@ Tauri 視窗 → React webview（前端 `src/`）──HTTP/WS──► Node sid
 ```powershell
 cd "D:\Leo work"
 npm run typecheck     # 前端 + sidecar 兩套 tsconfig，必須兩個都 exit 0
-npm test              # vitest（目前 84 項：加密/切片/WAV/AGC/VU/同步/引擎/雙軌/續傳/手機橋接）
+npm test              # vitest（目前 95 項：加密/切片/WAV/AGC/VU/同步/引擎/雙軌/續傳/手機橋接/Gemini 即時轉寫）
 npx vite build        # 前端打包確認
 ```
 - **碰加密 / 碰錢的程式**（`SecurityManager` 等）改完，commit 前先跑 `/code-review`（medium），回報「🔴 主要問題」，沒問題或修完才 commit。
