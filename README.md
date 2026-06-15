@@ -98,18 +98,21 @@ Leo work/
 | 一律繁中 | 不論原語言都轉繁體中文 |
 | 一律英文 | 一律轉英文 |
 
-### 3) AI 助理聊天
-底部「🦉 AI 助理」面板（`ChatAssistant.tsx`，可收合，預設收起讓逐字稿有完整高度）：對話式問當前逐字稿，並結合**跨會議記憶**（向量檢索）回答；走 `/chat`（`GeminiLlmService.chat`），記得多輪對話脈絡。
+### 3) 🦉 AI 助理（聊天 ＋ 討論完匯出，單一面板）
+底部「🦉 AI 助理」面板（`ChatAssistant.tsx`，可收合／可放大，預設展開、為主互動區）：
+- **聊天**：對話式問當前逐字稿，並結合**跨會議記憶**（向量檢索）回答；走 `/chat`（`GeminiLlmService.chat`），記得多輪對話脈絡。
+- **匯出**：面板上方匯出列 📋複製、⬇.md、**📄Word / 📊Excel / 📽PPT**。聊／討論完直接從這裡產出（詳見第 5 節）。
+- 此面板整合自原本分散的「AI 助理」與「與 AI 討論這份文件」兩個功能重複的面板；分析結果面板（`AnalysisPanel.tsx`）回歸純顯示主題/摘要/衝突/行動方針。
 
 ### 4) 翻譯
 逐字稿可一鍵翻譯成 en / ja / ko / zh，保留 `[mm:ss] 發言人:` 格式（`/translate`）。
 
 ### 5) 匯出會議記錄（.md / Word / Excel / PPT，可 AI 客製）
-分析結果面板（`AnalysisPanel.tsx`）右上匯出列：📋複製、⬇.md，以及 **📄 Word / 📊 Excel / 📽 PPT**，上方有一個 **AI 客製匯出指示框**。
+在 🦉 AI 助理面板上方匯出列：📋複製、⬇.md，以及 **📄 Word / 📊 Excel / 📽 PPT**（需先按「分析」有結果才可匯出）。
 - 產檔在**瀏覽器端用離線套件直接下載**（`src/lib/exporters.ts`：`docx` / `exceljs` / `pptxgenjs`），產檔庫**動態載入**（按鈕才載、切成獨立 chunk），初始啟動維持輕量。
 - **共用中介模型 `ComposedDoc`**（heading/paragraph/bullets/table 區塊，定義於 `shared/types.ts`）→ 三種格式都從同一份區塊渲染。
-- **預設範本（指示框留空）**：本機把分析結果排版，零 API。Word＝完整記錄含逐字稿；Excel＝概要＋各表獨立工作表；PPT＝封面＋每節一張投影片。
-- **AI 客製（與 AI 討論完再產出）**：匯出列上方可展開「🤖 與 AI 討論這份文件」對話框，多輪跟 Gemini 討論要怎麼整理（沿用 `/chat`＝當前逐字稿＋跨會議記憶）；談妥後點格式鈕 → sidecar `/export/compose` 交 **Gemini**（`composeExportDoc`，responseSchema 強制 JSON）依「**討論脈絡(history)** ＋格式＋會議資料」重組成 `ComposedDoc` 再渲染。只打一句沒送出也算最後指示（等於一次性客製）。例：「PPT 只放結論和數字」「Word 公文語氣加風險建議」「Excel 行動方針多一欄優先級」。需 `GEMINI_API_KEY`，產檔時多一次 Gemini 呼叫（免費額度內）。
+- **預設範本（沒跟 AI 討論就直接匯出）**：本機把分析結果排版，零 API。Word＝完整記錄含逐字稿；Excel＝概要＋各表獨立工作表；PPT＝封面＋每節一張投影片。
+- **AI 客製（與 AI 討論完再產出）**：先在助理裡多輪跟 Gemini 討論要怎麼整理 → 點格式鈕 → sidecar `/export/compose` 交 **Gemini**（`composeExportDoc`，responseSchema 強制 JSON）依「**討論脈絡(history)** ＋格式＋會議資料」重組成 `ComposedDoc` 再渲染。只打一句沒送出也算最後指示（等於一次性客製）。例：「PPT 只放結論和數字」「Word 公文語氣加風險建議」「Excel 行動方針多一欄優先級」。需 `GEMINI_API_KEY`，產檔時多一次 Gemini 呼叫（免費額度內）。
 
 ### 6) 整頁「記憶聊天」（跨會議記憶）
 App 頂部分頁「🦉 記憶聊天」（`MemoryChat.tsx`，不掛 `RouterPanel`）：純跨會議記憶問答，**不綁當前會議**。

@@ -1,26 +1,64 @@
-// ── AI 助理聊天面板 ──
-// 對話式問答；後端結合「當前會議逐字稿 + 跨會議記憶」用 Gemini 回答，記得對話脈絡。
+// ── AI 助理（聊天 ＋ 討論完再匯出）──
+// 對話式問答：後端結合「當前會議逐字稿 + 跨會議記憶」用 Gemini 回答，記得對話脈絡。
+// 匯出：把這段討論 + 會議資料交 Gemini 重組成 Word/Excel/PPT（沒討論＝預設範本）。
+// （本元件整合了原本分散的「AI 助理」與「與 AI 討論這份文件」兩個重複面板。）
 
 import { useState, type KeyboardEvent } from "react";
-import { chat } from "../lib/api";
-import type { ChatTurn } from "../shared/types";
+import { chat, composeExport } from "../lib/api";
+import type { ActionItem, ChatTurn, ProactiveAnalysis } from "../shared/types";
+import type { ExportData } from "../lib/exporters";
 
 const SUGGESTIONS = [
   "幫我總結這場會議的三個重點",
   "有哪些待辦？誰負責、何時交？",
-  "這場會議跟過去有沒有衝突？",
+  "整理成給主管的一頁式重點",
 ];
+
+/** 把分析結果組成 Markdown 會議記錄。 */
+function toMarkdown(a: ProactiveAnalysis, items: ActionItem[]): string {
+  const out: string[] = ["# 會議記錄", "", "## 會議主題", a.theme || "（無）", "", "## 關鍵討論摘要"];
+  if (a.key_summary.length) a.key_summary.forEach((s) => out.push(`- ${s}`));
+  else out.push("（無）");
+  out.push("", "## 歷史衝突點");
+  if (a.historical_conflicts.length) a.historical_conflicts.forEach((c) => out.push(`- ⚠️ ${c}`));
+  else out.push("（未發現衝突）");
+  out.push("", "## 行動方針");
+  if (items.length) {
+    out.push("| 任務 | 負責人 | 截止日 |", "|---|---|---|");
+    items.forEach((it) => out.push(`| ${it.task} | ${it.assignee} | ${it.deadline} |`));
+  } else {
+    out.push("（無）");
+  }
+  return out.join("\n");
+}
 
 export default function ChatAssistant({
   transcript,
+  analysis,
+  actionItems,
+  meetingTitle,
+  meetingDate,
+  big,
+  onToggleBig,
   onCollapse,
 }: {
   transcript: string;
+  analysis: ProactiveAnalysis | null;
+  actionItems: ActionItem[];
+  meetingTitle: string;
+  meetingDate: string;
+  big?: boolean;
+  onToggleBig?: () => void;
   onCollapse?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [exportErr, setExportErr] = useState<string | null>(null);
+
+  const aiMode = messages.length > 0 || input.trim().length > 0;
 
   async function send(text?: string) {
     const q = (text ?? input).trim();
@@ -49,37 +87,123 @@ export default function ChatAssistant({
     }
   }
 
+  function handleCopy() {
+    if (!analysis) return;
+    void navigator.clipboard.writeText(toMarkdown(analysis, actionItems));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+
+  function handleDownloadMd() {
+    if (!analysis) return;
+    const blob = new Blob([toMarkdown(analysis, actionItems)], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${meetingTitle?.trim() || "會議記錄"}-${meetingDate || new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * 匯出 Word/Excel/PPT：動態載入產檔庫。有討論/指示 → 交 Gemini 依「討論＋會議資料」重組；
+   * 完全沒討論 → 走本機預設範本。尚未送出的輸入也會當成最後一句指示。
+   */
+  async function runExport(kind: "docx" | "xlsx" | "pptx") {
+    if (!analysis) return;
+    setExportErr(null);
+    setExporting(kind);
+    try {
+      const m = await import("../lib/exporters");
+      const data: ExportData = {
+        title: meetingTitle?.trim() || "會議記錄",
+        date: meetingDate?.trim() || new Date().toISOString().slice(0, 10),
+        analysis,
+        actionItems,
+        transcript,
+      };
+      if (aiMode) {
+        const { doc } = await composeExport({
+          format: kind,
+          instruction: input.trim(),
+          history: messages,
+          title: data.title,
+          date: data.date,
+          analysis,
+          actionItems,
+          transcript,
+        });
+        await m.exportComposed(doc, kind, data);
+      } else {
+        const fn = kind === "docx" ? m.exportDocx : kind === "xlsx" ? m.exportXlsx : m.exportPptx;
+        await fn(data);
+      }
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : "匯出失敗");
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  const expBtn =
+    "rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-40";
+
   return (
     <section className="flex h-full flex-col gap-2">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="text-lg">🦉</span>
         <h2 className="text-sm font-semibold text-slate-200">AI 助理</h2>
-        <span className="text-xs text-slate-500">問當前會議 ＋ 跨會議記憶</span>
+        <span className="hidden text-xs text-slate-500 sm:inline">問當前會議 ＋ 跨會議記憶 ＋ 討論完匯出</span>
         <div className="ml-auto flex items-center gap-3">
           {messages.length > 0 && (
-            <button
-              onClick={() => setMessages([])}
-              className="text-xs text-slate-500 hover:text-slate-300"
-            >
+            <button onClick={() => setMessages([])} className="text-xs text-slate-500 hover:text-slate-300">
               清空
             </button>
           )}
+          {onToggleBig && (
+            <button onClick={onToggleBig} className="text-xs text-slate-500 hover:text-slate-300">
+              {big ? "⤡ 縮小" : "⤢ 放大"}
+            </button>
+          )}
           {onCollapse && (
-            <button
-              onClick={onCollapse}
-              className="text-xs text-slate-500 hover:text-slate-300"
-            >
+            <button onClick={onCollapse} className="text-xs text-slate-500 hover:text-slate-300">
               ▾ 收起
             </button>
           )}
         </div>
       </div>
 
+      {/* 匯出列：聊完／討論完後一鍵產出 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-slate-500">匯出：</span>
+        <button onClick={handleCopy} disabled={!analysis} className={expBtn}>
+          {copied ? "✓ 已複製" : "📋 複製"}
+        </button>
+        <button onClick={handleDownloadMd} disabled={!analysis} className={expBtn}>
+          ⬇ .md
+        </button>
+        <button onClick={() => void runExport("docx")} disabled={!analysis || exporting !== null} className={expBtn}>
+          {exporting === "docx" ? "產生中…" : "📄 Word"}
+        </button>
+        <button onClick={() => void runExport("xlsx")} disabled={!analysis || exporting !== null} className={expBtn}>
+          {exporting === "xlsx" ? "產生中…" : "📊 Excel"}
+        </button>
+        <button onClick={() => void runExport("pptx")} disabled={!analysis || exporting !== null} className={expBtn}>
+          {exporting === "pptx" ? "產生中…" : "📽 PPT"}
+        </button>
+        {!analysis ? (
+          <span className="text-[11px] text-slate-500">先按上方「分析」才能匯出</span>
+        ) : aiMode ? (
+          <span className="text-[11px] text-brand-accent">✨ 將依本次討論用 AI 重組後產檔</span>
+        ) : null}
+      </div>
+      {exportErr && <p className="text-xs text-brand-danger">匯出失敗：{exportErr}</p>}
+
       <div className="flex-1 space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-brand-dark/40 p-3">
         {messages.length === 0 ? (
           <div className="space-y-3">
             <p className="text-sm text-slate-400">
-              需要什麼？直接問我——我看得到目前的逐字稿，也記得你存過的歷史會議。
+              需要什麼？直接問我——我看得到目前的逐字稿，也記得你存過的歷史會議。談妥後可直接從上方「匯出」一鍵產出 Word/Excel/PPT。
             </p>
             <div className="flex flex-wrap gap-2">
               {SUGGESTIONS.map((s) => (
@@ -118,7 +242,7 @@ export default function ChatAssistant({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKey}
-          placeholder="請輸入問題…（Enter 送出）"
+          placeholder="問問題或討論要怎麼整理…（Enter 送出；談妥按上方匯出）"
           className="flex-1 rounded-md border border-white/10 bg-brand-dark/60 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand"
         />
         <button

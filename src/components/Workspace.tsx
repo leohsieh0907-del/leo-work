@@ -88,7 +88,8 @@ export default function Workspace() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0); // +1 觸發歷史欄重抓
-  const [chatOpen, setChatOpen] = useState(false); // AI 助理預設收起，讓逐字稿有空間
+  const [chatOpen, setChatOpen] = useState(true); // AI 助理（聊天＋匯出）為主互動區，預設展開
+  const [chatBig, setChatBig] = useState(false); // 放大：給討論/匯出更大空間
 
   // 手機/電腦收音停止後的「整檔精修帶入會議」
   const { recordingReady, recordingSeconds, recordingTruncated, finalizing, finalizeRecording } =
@@ -297,18 +298,26 @@ export default function Workspace() {
                 actionItems={actionItems}
                 historicalContext={historicalContext}
                 loading={analyzing}
-                transcript={transcript}
-                meetingTitle={meetingId}
-                meetingDate={meetingDate}
               />
             </div>
           </div>
         </div>
 
-        {/* 底部：AI 助理（可收合，預設收起讓逐字稿有空間）*/}
+        {/* 底部：🦉 AI 助理（聊天 ＋ 討論完匯出，整合自原本兩個重複面板）。可收合、可放大。*/}
         {chatOpen ? (
-          <div className="h-72 shrink-0 rounded-lg border border-white/10 bg-brand-panel/40 p-4">
-            <ChatAssistant transcript={transcript} onCollapse={() => setChatOpen(false)} />
+          <div
+            className={`${chatBig ? "h-[32rem]" : "h-80"} shrink-0 rounded-lg border border-white/10 bg-brand-panel/40 p-4`}
+          >
+            <ChatAssistant
+              transcript={transcript}
+              analysis={analysis}
+              actionItems={actionItems}
+              meetingTitle={meetingId}
+              meetingDate={meetingDate}
+              big={chatBig}
+              onToggleBig={() => setChatBig((v) => !v)}
+              onCollapse={() => setChatOpen(false)}
+            />
           </div>
         ) : (
           <button
@@ -317,7 +326,7 @@ export default function Workspace() {
           >
             <span className="text-lg">🦉</span>
             <span className="font-medium">AI 助理</span>
-            <span className="text-xs text-slate-500">— 點開問當前會議 ＋ 跨會議記憶</span>
+            <span className="text-xs text-slate-500">— 聊當前會議 ＋ 跨會議記憶，談妥一鍵匯出 Word/Excel/PPT</span>
           </button>
         )}
       </div>
