@@ -109,7 +109,7 @@ Leo work/
 - 產檔在**瀏覽器端用離線套件直接下載**（`src/lib/exporters.ts`：`docx` / `exceljs` / `pptxgenjs`），產檔庫**動態載入**（按鈕才載、切成獨立 chunk），初始啟動維持輕量。
 - **共用中介模型 `ComposedDoc`**（heading/paragraph/bullets/table 區塊，定義於 `shared/types.ts`）→ 三種格式都從同一份區塊渲染。
 - **預設範本（指示框留空）**：本機把分析結果排版，零 API。Word＝完整記錄含逐字稿；Excel＝概要＋各表獨立工作表；PPT＝封面＋每節一張投影片。
-- **AI 客製（指示框填白話）**：點格式鈕 → sidecar `/export/compose` 交 **Gemini**（`composeExportDoc`，responseSchema 強制 JSON）依「格式＋你的指示」重組成 `ComposedDoc` 再渲染。例：「PPT 只放結論和數字」「Word 用正式公文語氣加風險建議」「Excel 行動方針多一欄優先級」。需 `GEMINI_API_KEY`，多一次 Gemini 呼叫（免費額度內）。
+- **AI 客製（與 AI 討論完再產出）**：匯出列上方可展開「🤖 與 AI 討論這份文件」對話框，多輪跟 Gemini 討論要怎麼整理（沿用 `/chat`＝當前逐字稿＋跨會議記憶）；談妥後點格式鈕 → sidecar `/export/compose` 交 **Gemini**（`composeExportDoc`，responseSchema 強制 JSON）依「**討論脈絡(history)** ＋格式＋會議資料」重組成 `ComposedDoc` 再渲染。只打一句沒送出也算最後指示（等於一次性客製）。例：「PPT 只放結論和數字」「Word 公文語氣加風險建議」「Excel 行動方針多一欄優先級」。需 `GEMINI_API_KEY`，產檔時多一次 Gemini 呼叫（免費額度內）。
 
 ### 6) 整頁「記憶聊天」（跨會議記憶）
 App 頂部分頁「🦉 記憶聊天」（`MemoryChat.tsx`，不掛 `RouterPanel`）：純跨會議記憶問答，**不綁當前會議**。

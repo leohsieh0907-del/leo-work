@@ -201,11 +201,13 @@ export interface ComposedDoc {
   blocks: DocBlock[];
 }
 
-/** AI 客製匯出請求：把會議資料＋使用者指示交給 Gemini，依目標格式重組成 ComposedDoc。 */
+/** AI 客製匯出請求：把會議資料＋使用者指示/討論交給 Gemini，依目標格式重組成 ComposedDoc。 */
 export interface ComposeExportRequest {
   format: ExportFormat;
-  /** 使用者白話指示（語氣、重點取捨、增刪欄位/段落…） */
+  /** 使用者白話指示（語氣、重點取捨、增刪欄位/段落…）；可留空只靠 history。 */
   instruction: string;
+  /** 與 AI 的多輪討論脈絡（討論完再產出時帶入，讓文件反映討論結果）。 */
+  history?: ChatTurn[];
   title: string;
   date: string;
   analysis: ProactiveAnalysis | null;

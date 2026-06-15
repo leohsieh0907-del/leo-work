@@ -390,7 +390,19 @@ export class GeminiLlmService implements LlmService {
       .filter(Boolean)
       .join("\n\n");
 
-    const user = `=== 使用者指示 ===\n${req.instruction}\n\n=== 會議資料 ===\n${source}`;
+    // 討論完再產出：把與 AI 的多輪討論當成最高優先的依據。
+    const discussion = (req.history ?? [])
+      .filter((h) => h.text?.trim())
+      .map((h) => `${h.role === "assistant" ? "AI" : "我"}：${h.text.trim()}`)
+      .join("\n");
+    const directive = req.instruction.trim() || "請依我們的討論整理出這份文件的內容。";
+
+    const user =
+      `=== 使用者指示 ===\n${directive}\n\n` +
+      (discussion
+        ? `=== 我與 AI 的討論（請把討論中的結論與決定確實反映到文件，與會議資料衝突時以討論為準）===\n${discussion}\n\n`
+        : "") +
+      `=== 會議資料 ===\n${source}`;
 
     const raw = await this.generate(system, user, COMPOSED_DOC_SCHEMA);
     return normalizeComposedDoc(safeJsonObject(raw), req.title);

@@ -356,7 +356,10 @@ app.post(
   "/export/compose",
   wrap(async (req, res) => {
     const body = req.body as ComposeExportRequest;
-    if (!body?.instruction?.trim()) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 instruction");
+    const hasHistory = Array.isArray(body?.history) && body.history.length > 0;
+    if (!body?.instruction?.trim() && !hasHistory) {
+      throw new AppError(ErrorCode.INVALID_INPUT, "缺少 instruction 或討論內容");
+    }
     if (body.format !== "docx" && body.format !== "xlsx" && body.format !== "pptx") {
       throw new AppError(ErrorCode.INVALID_INPUT, "format 必須是 docx / xlsx / pptx");
     }

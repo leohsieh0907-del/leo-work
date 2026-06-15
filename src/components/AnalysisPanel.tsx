@@ -2,9 +2,9 @@
 // 渲染：會議主題、關鍵討論摘要、⚠️ 歷史衝突點、行動方針表格；可複製/匯出 Markdown。
 
 import { useState } from "react";
-import type { ActionItem, ProactiveAnalysis } from "../shared/types";
+import type { ActionItem, ChatTurn, ProactiveAnalysis } from "../shared/types";
 import type { ExportData } from "../lib/exporters";
-import { composeExport } from "../lib/api";
+import { chat, composeExport } from "../lib/api";
 
 interface AnalysisPanelProps {
   analysis: ProactiveAnalysis | null;
@@ -46,7 +46,12 @@ export default function AnalysisPanel({
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [exportErr, setExportErr] = useState<string | null>(null);
-  const [instruction, setInstruction] = useState(""); // AI 客製匯出指示（留空＝預設範本）
+
+  // 「與 AI 討論這份文件」：討論完再產出。留空＝預設範本。
+  const [discussOpen, setDiscussOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatTurn[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
 
   async function handleCopy() {
     if (!analysis) return;
@@ -66,9 +71,31 @@ export default function AnalysisPanel({
     URL.revokeObjectURL(url);
   }
 
+  const aiMode = messages.length > 0 || chatInput.trim().length > 0;
+
+  /** 送出一輪討論（沿用 /chat：當前逐字稿 + 跨會議記憶 + 多輪脈絡）。 */
+  async function handleSend() {
+    const q = chatInput.trim();
+    if (!q || chatBusy) return;
+    setExportErr(null);
+    setChatBusy(true);
+    const prior = messages;
+    setMessages([...prior, { role: "user", text: q }]);
+    setChatInput("");
+    try {
+      const { answer } = await chat({ question: q, transcript: transcript ?? "", history: prior });
+      setMessages((m) => [...m, { role: "assistant", text: answer }]);
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : "討論失敗");
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
   /**
    * 共用：動態載入產檔庫（只在按下時才載），把當前分析包成匯出資料。
-   * 有填指示 → 先請 Gemini 依指示重組（/export/compose）再渲染；留空 → 走本機預設範本。
+   * 有討論/指示 → 先請 Gemini 依「討論＋會議資料」重組（/export/compose）再渲染；
+   * 完全留空 → 走本機預設範本。尚未送出的輸入也會當成最後一句指示帶入。
    */
   async function runExport(kind: "docx" | "xlsx" | "pptx") {
     if (!analysis) return;
@@ -83,11 +110,11 @@ export default function AnalysisPanel({
         actionItems,
         transcript,
       };
-      const instr = instruction.trim();
-      if (instr) {
+      if (aiMode) {
         const { doc } = await composeExport({
           format: kind,
-          instruction: instr,
+          instruction: chatInput.trim(), // 尚未送出的輸入＝最後指示（可空）
+          history: messages,
           title: data.title,
           date: data.date,
           analysis,
@@ -124,21 +151,72 @@ export default function AnalysisPanel({
 
   return (
     <section className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
-      {/* AI 客製匯出指示（選填）：留空＝預設範本；填了＝Gemini 依指示重組後再匯出 */}
-      <div className="flex flex-col gap-1">
-        <input
-          type="text"
-          value={instruction}
-          onChange={(e) => setInstruction(e.target.value)}
-          placeholder="🤖 AI 客製匯出（選填）：例「PPT 只放結論和數字」「Word 用正式公文語氣」「Excel 加一欄優先級」"
-          className="w-full rounded-md border border-white/10 bg-brand-dark/60 px-2.5 py-1.5 text-xs text-slate-100 outline-none placeholder:text-slate-500 focus:border-brand"
-        />
-        {instruction.trim() && (
-          <span className="text-[11px] text-brand-accent">
-            ✨ 已啟用 AI 客製：點下方格式鈕會先請 AI 依你的指示重組內容再產檔（多一次 Gemini 呼叫）
-          </span>
+      {/* 與 AI 討論這份文件（討論完再產出）。可收合，預設收起讓分析有完整高度。 */}
+      <div className="rounded-md border border-white/10 bg-black/20">
+        <button
+          onClick={() => setDiscussOpen((v) => !v)}
+          className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-slate-100 transition hover:bg-white/5"
+        >
+          <span>🤖 與 AI 討論這份文件後再匯出{messages.length > 0 ? `（已討論 ${messages.length} 則）` : ""}</span>
+          <span className="text-slate-400">{discussOpen ? "▾ 收起" : "▸ 展開"}</span>
+        </button>
+        {discussOpen && (
+          <div className="flex flex-col gap-2 px-3 pb-3">
+            {messages.length > 0 && (
+              <div className="max-h-44 space-y-2 overflow-y-auto rounded-md bg-black/20 p-2">
+                {messages.map((msg, i) => (
+                  <div key={i} className={msg.role === "user" ? "text-right" : "text-left"}>
+                    <span
+                      className={`inline-block max-w-[85%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-xs ${
+                        msg.role === "user" ? "bg-brand/30 text-slate-100" : "bg-white/5 text-slate-200"
+                      }`}
+                    >
+                      {msg.text}
+                    </span>
+                  </div>
+                ))}
+                {chatBusy && <p className="text-left text-xs text-slate-500">AI 思考中…</p>}
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              <textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
+                }}
+                rows={2}
+                placeholder="跟 AI 討論要怎麼整理，例「幫我精簡成給投資人看的」「行動方針加一欄優先級」，談完按下方格式鈕產出。Enter 送出 / Shift+Enter 換行"
+                className="flex-1 resize-none rounded-md border border-white/10 bg-brand-dark/60 px-2.5 py-1.5 text-xs text-slate-100 outline-none placeholder:text-slate-500 focus:border-brand"
+              />
+              <button
+                onClick={() => void handleSend()}
+                disabled={chatBusy || !chatInput.trim()}
+                className="shrink-0 rounded-md bg-brand px-3 py-2 text-xs font-medium text-white transition hover:bg-brand/80 disabled:opacity-50"
+              >
+                送出
+              </button>
+              {messages.length > 0 && (
+                <button
+                  onClick={() => setMessages([])}
+                  disabled={chatBusy}
+                  className="shrink-0 rounded-md border border-white/10 px-2 py-2 text-xs text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
+                >
+                  清除
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
+      {aiMode && (
+        <span className="-mt-2 text-[11px] text-brand-accent">
+          ✨ 已啟用 AI 客製：點下方 Word/Excel/PPT 會依「討論＋會議資料」用 AI 重組後再產檔（多一次 Gemini 呼叫）
+        </span>
+      )}
 
       {/* 匯出列 */}
       <div className="flex flex-wrap items-center justify-end gap-2">
