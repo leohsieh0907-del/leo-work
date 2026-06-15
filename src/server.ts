@@ -51,6 +51,8 @@ import {
   type TranscribeLang,
   type SavedMeeting,
   type ChatTurn,
+  type ComposeExportRequest,
+  type ComposeExportResponse,
 } from "./shared/types";
 
 // ─────────────── 環境設定 ───────────────
@@ -346,6 +348,23 @@ app.post(
     const memory = await vectorStore.queryHistoricalContext(question, 3).catch(() => "");
     const answer = await geminiStt.chat(question, transcript ?? "", memory, history ?? []);
     res.json({ answer });
+  }),
+);
+
+// AI 客製匯出：依「格式 + 使用者指示」把會議資料重組成通用文件區塊（前端再渲染成 Word/Excel/PPT）
+app.post(
+  "/export/compose",
+  wrap(async (req, res) => {
+    const body = req.body as ComposeExportRequest;
+    if (!body?.instruction?.trim()) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 instruction");
+    if (body.format !== "docx" && body.format !== "xlsx" && body.format !== "pptx") {
+      throw new AppError(ErrorCode.INVALID_INPUT, "format 必須是 docx / xlsx / pptx");
+    }
+    if (!geminiStt) {
+      throw new AppError(ErrorCode.CONFIG_MISSING, "AI 客製匯出需要 GEMINI_API_KEY，請於 .env 設定");
+    }
+    const doc = await geminiStt.composeExportDoc(body);
+    res.json({ doc } satisfies ComposeExportResponse);
   }),
 );
 

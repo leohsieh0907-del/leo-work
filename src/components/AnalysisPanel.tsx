@@ -3,12 +3,17 @@
 
 import { useState } from "react";
 import type { ActionItem, ProactiveAnalysis } from "../shared/types";
+import type { ExportData } from "../lib/exporters";
+import { composeExport } from "../lib/api";
 
 interface AnalysisPanelProps {
   analysis: ProactiveAnalysis | null;
   actionItems: ActionItem[];
   historicalContext: string;
   loading: boolean;
+  transcript?: string;
+  meetingTitle?: string;
+  meetingDate?: string;
 }
 
 /** 把分析結果組成 Markdown 會議記錄。 */
@@ -34,8 +39,14 @@ export default function AnalysisPanel({
   actionItems,
   historicalContext,
   loading,
+  transcript,
+  meetingTitle,
+  meetingDate,
 }: AnalysisPanelProps) {
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [exportErr, setExportErr] = useState<string | null>(null);
+  const [instruction, setInstruction] = useState(""); // AI 客製匯出指示（留空＝預設範本）
 
   async function handleCopy() {
     if (!analysis) return;
@@ -53,6 +64,46 @@ export default function AnalysisPanel({
     a.download = `會議記錄-${new Date().toISOString().slice(0, 10)}.md`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  /**
+   * 共用：動態載入產檔庫（只在按下時才載），把當前分析包成匯出資料。
+   * 有填指示 → 先請 Gemini 依指示重組（/export/compose）再渲染；留空 → 走本機預設範本。
+   */
+  async function runExport(kind: "docx" | "xlsx" | "pptx") {
+    if (!analysis) return;
+    setExportErr(null);
+    setExporting(kind);
+    try {
+      const m = await import("../lib/exporters");
+      const data: ExportData = {
+        title: meetingTitle?.trim() || "會議記錄",
+        date: meetingDate?.trim() || new Date().toISOString().slice(0, 10),
+        analysis,
+        actionItems,
+        transcript,
+      };
+      const instr = instruction.trim();
+      if (instr) {
+        const { doc } = await composeExport({
+          format: kind,
+          instruction: instr,
+          title: data.title,
+          date: data.date,
+          analysis,
+          actionItems,
+          transcript,
+        });
+        await m.exportComposed(doc, kind, data);
+      } else {
+        const fn = kind === "docx" ? m.exportDocx : kind === "xlsx" ? m.exportXlsx : m.exportPptx;
+        await fn(data);
+      }
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : "匯出失敗");
+    } finally {
+      setExporting(null);
+    }
   }
 
   if (loading) {
@@ -73,8 +124,24 @@ export default function AnalysisPanel({
 
   return (
     <section className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
+      {/* AI 客製匯出指示（選填）：留空＝預設範本；填了＝Gemini 依指示重組後再匯出 */}
+      <div className="flex flex-col gap-1">
+        <input
+          type="text"
+          value={instruction}
+          onChange={(e) => setInstruction(e.target.value)}
+          placeholder="🤖 AI 客製匯出（選填）：例「PPT 只放結論和數字」「Word 用正式公文語氣」「Excel 加一欄優先級」"
+          className="w-full rounded-md border border-white/10 bg-brand-dark/60 px-2.5 py-1.5 text-xs text-slate-100 outline-none placeholder:text-slate-500 focus:border-brand"
+        />
+        {instruction.trim() && (
+          <span className="text-[11px] text-brand-accent">
+            ✨ 已啟用 AI 客製：點下方格式鈕會先請 AI 依你的指示重組內容再產檔（多一次 Gemini 呼叫）
+          </span>
+        )}
+      </div>
+
       {/* 匯出列 */}
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           onClick={handleCopy}
           className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10"
@@ -85,9 +152,31 @@ export default function AnalysisPanel({
           onClick={handleDownload}
           className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10"
         >
-          ⬇ 匯出 .md
+          ⬇ .md
+        </button>
+        <button
+          onClick={() => void runExport("docx")}
+          disabled={exporting !== null}
+          className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+        >
+          {exporting === "docx" ? "產生中…" : "📄 Word"}
+        </button>
+        <button
+          onClick={() => void runExport("xlsx")}
+          disabled={exporting !== null}
+          className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+        >
+          {exporting === "xlsx" ? "產生中…" : "📊 Excel"}
+        </button>
+        <button
+          onClick={() => void runExport("pptx")}
+          disabled={exporting !== null}
+          className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+        >
+          {exporting === "pptx" ? "產生中…" : "📽 PPT"}
         </button>
       </div>
+      {exportErr && <p className="text-right text-xs text-brand-danger">匯出失敗：{exportErr}</p>}
 
       {/* 會議主題 */}
       <div>

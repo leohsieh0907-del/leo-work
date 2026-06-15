@@ -16,6 +16,9 @@ import {
   type ProactiveAnalysis,
   type ActionItem,
   type ChatTurn,
+  type ComposedDoc,
+  type ComposeExportRequest,
+  type DocBlock,
 } from "../shared/types";
 import type { LlmService } from "./llm/types";
 
@@ -56,6 +59,29 @@ const ACTION_ITEMS_SCHEMA = {
     },
   },
   required: ["items"],
+};
+
+// 客製匯出：通用文件區塊（扁平結構利於 Gemini 穩定輸出）。
+const COMPOSED_DOC_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    blocks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["heading", "paragraph", "bullets", "table"] },
+          text: { type: "string" },
+          items: { type: "array", items: { type: "string" } },
+          columns: { type: "array", items: { type: "string" } },
+          rows: { type: "array", items: { type: "array", items: { type: "string" } } },
+        },
+        required: ["type"],
+      },
+    },
+  },
+  required: ["title", "blocks"],
 };
 
 function languageName(code: string): string {
@@ -325,6 +351,74 @@ export class GeminiLlmService implements LlmService {
     const answer = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
     return answer.trim() || "（沒有產生回覆，請換個方式問問看）";
   }
+
+  /**
+   * AI 客製匯出：依「目標格式 + 使用者白話指示」把會議資料重組成通用文件區塊（ComposedDoc）。
+   * 前端再把 ComposedDoc 渲染成 Word / Excel / PPT。只根據提供的資料，不虛構。
+   */
+  async composeExportDoc(req: ComposeExportRequest): Promise<ComposedDoc> {
+    const a = req.analysis;
+    const fmtName =
+      req.format === "docx" ? "Word 文件" : req.format === "xlsx" ? "Excel 試算表" : "PowerPoint 簡報";
+    const fmtRule =
+      req.format === "xlsx"
+        ? "這是 Excel：盡量用 table 區塊承載結構化資料（每個 table 會變成一張工作表），少用長段落。"
+        : req.format === "pptx"
+          ? "這是 PPT 簡報：要精簡。用 heading 當投影片標題、bullets 當要點（每個 heading 會開一張新投影片）；文字短、條列化，不要長段落。"
+          : "這是 Word 文件：可用 heading 分節、paragraph 寫敘述、bullets 列重點、table 放結構化資料。";
+
+    const system =
+      `你是專業的會議文件製作助理，要把會議資料整理成一份「${fmtName}」的內容（結構化區塊）。\n` +
+      "嚴格遵守使用者指示（語氣、重點取捨、要不要新增欄位/段落等）。\n" +
+      "只能依據提供的會議資料，不可虛構事實；使用者要求新增的欄位若資料沒有，留空或標『未提供』。\n" +
+      fmtRule +
+      "\n區塊類型：heading(填 text)、paragraph(填 text)、bullets(填 items[])、table(填 columns[] 與 rows[][])。\n" +
+      "title 為文件標題。全程使用繁體中文，只輸出 JSON。";
+
+    const source = [
+      `會議名稱：${req.title}`,
+      `日期：${req.date}`,
+      `會議主題：${a?.theme || "（無）"}`,
+      `關鍵摘要：\n${(a?.key_summary ?? []).map((s) => "- " + s).join("\n") || "（無）"}`,
+      `歷史衝突：\n${(a?.historical_conflicts ?? []).map((s) => "- " + s).join("\n") || "（無）"}`,
+      `行動方針：\n${
+        (req.actionItems ?? []).map((it) => `- ${it.task}｜負責人：${it.assignee}｜截止：${it.deadline}`).join("\n") ||
+        "（無）"
+      }`,
+      req.transcript?.trim() ? `逐字稿（節錄）：\n${req.transcript.slice(0, 8000)}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const user = `=== 使用者指示 ===\n${req.instruction}\n\n=== 會議資料 ===\n${source}`;
+
+    const raw = await this.generate(system, user, COMPOSED_DOC_SCHEMA);
+    return normalizeComposedDoc(safeJsonObject(raw), req.title);
+  }
+}
+
+/** 防呆解析 Gemini 回的 ComposedDoc：濾掉空/壞區塊，欄位型別歸一。 */
+function normalizeComposedDoc(obj: Record<string, unknown>, fallbackTitle: string): ComposedDoc {
+  const rawBlocks = Array.isArray(obj.blocks) ? obj.blocks : [];
+  const blocks: DocBlock[] = [];
+  for (const b of rawBlocks) {
+    if (!b || typeof b !== "object") continue;
+    const r = b as Record<string, unknown>;
+    if (r.type === "heading" || r.type === "paragraph") {
+      const text = String(r.text ?? "").trim();
+      if (text) blocks.push({ type: r.type, text });
+    } else if (r.type === "bullets") {
+      const items = toStrArray(r.items);
+      if (items.length) blocks.push({ type: "bullets", items });
+    } else if (r.type === "table") {
+      const columns = toStrArray(r.columns);
+      const rows = Array.isArray(r.rows)
+        ? r.rows.map((row) => toStrArray(row)).filter((row) => row.length > 0)
+        : [];
+      if (columns.length || rows.length) blocks.push({ type: "table", columns, rows });
+    }
+  }
+  return { title: String(obj.title ?? "").trim() || fallbackTitle, blocks };
 }
 
 /** 安全解析成物件（responseSchema 下通常已是乾淨 JSON；仍防呆）。 */

@@ -13,6 +13,8 @@ import type {
   SavedMeeting,
   MeetingListItem,
   ChatTurn,
+  ComposeExportRequest,
+  ComposeExportResponse,
 } from "../shared/types";
 
 // sidecar 監聽位址（對應 .env 的 SIDECAR_PORT；前端固定走本機回環）
@@ -83,6 +85,11 @@ export function chat(req: {
   history: ChatTurn[];
 }): Promise<{ answer: string }> {
   return post("/chat", req);
+}
+
+/** AI 客製匯出：依格式＋白話指示，請 Gemini 把會議資料重組成通用文件區塊。 */
+export function composeExport(req: ComposeExportRequest): Promise<ComposeExportResponse> {
+  return post("/export/compose", req);
 }
 
 /** 會議存檔（加密落地，同 id 覆蓋）。 */

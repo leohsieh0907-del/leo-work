@@ -35,6 +35,7 @@ export default function RouterPanel() {
   // 手機收音 QR session（手機掃描用）
   const [phoneSession, setPhoneSession] = useState<PhoneSession | null>(null);
   const [phoneSessionErr, setPhoneSessionErr] = useState<string | null>(null);
+  const [qrOpen, setQrOpen] = useState(true); // QR 可收放，避免擋位置（手機連上後可收起）
 
   // 掛載時連上 /events
   useEffect(() => connect(), [connect]);
@@ -115,29 +116,39 @@ export default function RouterPanel() {
         </div>
       </div>
 
-      {/* 手機收音：QR + 連線指引（手機掃描當無線麥克風）*/}
+      {/* 手機收音：QR + 連線指引（可收放，避免擋位置）*/}
       {phoneActive && (
-        <div className="flex flex-wrap items-center gap-4 rounded-md border border-white/10 bg-black/20 px-3 py-3">
-          {phoneSession ? (
-            <>
-              <img
-                src={phoneSession.qrDataUrl}
-                alt="手機收音 QR"
-                className="h-32 w-32 shrink-0 rounded bg-white p-1"
-              />
-              <div className="flex flex-col gap-1 text-xs text-slate-300">
-                <span className="text-sm font-medium text-slate-100">📱 用手機掃 QR 當無線麥克風</span>
-                <span>1. 手機與電腦連同一個 Wi-Fi，掃描左方 QR</span>
-                <span>2. 首次會跳「憑證不受信任」→ 選繼續前往（自簽憑證，正常）</span>
-                <span>3. 開頁後按「開始傳送」，聲音即時回傳並轉成逐字稿</span>
-                <span className="mt-1 break-all text-slate-500">{phoneSession.url}</span>
-                <span className="text-slate-500">手機開始傳送後，下方音量條會跳動、即時逐字稿會出現。</span>
-              </div>
-            </>
-          ) : phoneSessionErr ? (
-            <span className="text-xs text-brand-danger">取得手機連線資訊失敗：{phoneSessionErr}</span>
-          ) : (
-            <span className="text-xs text-slate-400">產生手機連線 QR 中…</span>
+        <div className="rounded-md border border-white/10 bg-black/20">
+          <button
+            onClick={() => setQrOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/5"
+          >
+            <span>📱 用手機掃 QR 當無線麥克風</span>
+            <span className="text-xs text-slate-400">{qrOpen ? "▾ 收起 QR" : "▸ 展開 QR"}</span>
+          </button>
+          {qrOpen && (
+            <div className="flex flex-wrap items-center gap-4 px-3 pb-3">
+              {phoneSession ? (
+                <>
+                  <img
+                    src={phoneSession.qrDataUrl}
+                    alt="手機收音 QR"
+                    className="h-32 w-32 shrink-0 rounded bg-white p-1"
+                  />
+                  <div className="flex flex-col gap-1 text-xs text-slate-300">
+                    <span>1. 手機與電腦連同一個 Wi-Fi，掃描左方 QR</span>
+                    <span>2. 首次會跳「憑證不受信任」→ 選繼續前往（自簽憑證，正常）</span>
+                    <span>3. 開頁後按「開始傳送」，聲音即時回傳並轉成逐字稿</span>
+                    <span className="mt-1 break-all text-slate-500">{phoneSession.url}</span>
+                    <span className="text-slate-500">手機開始傳送後，下方音量條會跳動、即時逐字稿會出現。</span>
+                  </div>
+                </>
+              ) : phoneSessionErr ? (
+                <span className="text-xs text-brand-danger">取得手機連線資訊失敗：{phoneSessionErr}</span>
+              ) : (
+                <span className="text-xs text-slate-400">產生手機連線 QR 中…</span>
+              )}
+            </div>
           )}
         </div>
       )}

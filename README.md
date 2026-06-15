@@ -31,6 +31,7 @@
 | 嵌入 | `@xenova/transformers` ONNX `all-MiniLM-L6-v2`（離線；可切 OpenAI / Ollama） |
 | LLM（摘要/分析/翻譯） | 三選一（`LLM_PROVIDER`）：**Gemini**（現用預設、雲端免費額度、中文強）/ 本地 Ollama（程式內建 fallback、$0 離線）/ Claude（付費）。**轉錄／即時逐字稿／AI 助理對話固定走 Gemini**（需 `GEMINI_API_KEY`） |
 | 音訊修復 | `fluent-ffmpeg` + `ffmpeg-static` |
+| 匯出 Office | `docx`（Word）/ `exceljs`（Excel）/ `pptxgenjs`（PPT），瀏覽器端離線產檔、動態載入 |
 
 ---
 
@@ -100,13 +101,20 @@ Leo work/
 ### 3) AI 助理聊天
 底部「🦉 AI 助理」面板（`ChatAssistant.tsx`，可收合，預設收起讓逐字稿有完整高度）：對話式問當前逐字稿，並結合**跨會議記憶**（向量檢索）回答；走 `/chat`（`GeminiLlmService.chat`），記得多輪對話脈絡。
 
-### 5) 整頁「記憶聊天」（跨會議記憶）
+### 4) 翻譯
+逐字稿可一鍵翻譯成 en / ja / ko / zh，保留 `[mm:ss] 發言人:` 格式（`/translate`）。
+
+### 5) 匯出會議記錄（.md / Word / Excel / PPT，可 AI 客製）
+分析結果面板（`AnalysisPanel.tsx`）右上匯出列：📋複製、⬇.md，以及 **📄 Word / 📊 Excel / 📽 PPT**，上方有一個 **AI 客製匯出指示框**。
+- 產檔在**瀏覽器端用離線套件直接下載**（`src/lib/exporters.ts`：`docx` / `exceljs` / `pptxgenjs`），產檔庫**動態載入**（按鈕才載、切成獨立 chunk），初始啟動維持輕量。
+- **共用中介模型 `ComposedDoc`**（heading/paragraph/bullets/table 區塊，定義於 `shared/types.ts`）→ 三種格式都從同一份區塊渲染。
+- **預設範本（指示框留空）**：本機把分析結果排版，零 API。Word＝完整記錄含逐字稿；Excel＝概要＋各表獨立工作表；PPT＝封面＋每節一張投影片。
+- **AI 客製（指示框填白話）**：點格式鈕 → sidecar `/export/compose` 交 **Gemini**（`composeExportDoc`，responseSchema 強制 JSON）依「格式＋你的指示」重組成 `ComposedDoc` 再渲染。例：「PPT 只放結論和數字」「Word 用正式公文語氣加風險建議」「Excel 行動方針多一欄優先級」。需 `GEMINI_API_KEY`，多一次 Gemini 呼叫（免費額度內）。
+
+### 6) 整頁「記憶聊天」（跨會議記憶）
 App 頂部分頁「🦉 記憶聊天」（`MemoryChat.tsx`，不掛 `RouterPanel`）：純跨會議記憶問答，**不綁當前會議**。
 - 空狀態＝歡迎 hero（標題「Leo work 可以幫您做些什麼？／您的記憶在內」+ 大圓角輸入框 + 11 張帶 icon/說明的建議卡）；有對話＝訊息串 + 底部輸入列，可「＋新對話」回首頁。
 - 與底部 AI 助理同走 `/chat`，差別是 `transcript:""`（無當前逐字稿、純向量檢索跨會議記憶）。
-
-### 4) 翻譯
-逐字稿可一鍵翻譯成 en / ja / ko / zh，保留 `[mm:ss] 發言人:` 格式（`/translate`）。
 
 ---
 

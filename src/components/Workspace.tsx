@@ -297,6 +297,9 @@ export default function Workspace() {
                 actionItems={actionItems}
                 historicalContext={historicalContext}
                 loading={analyzing}
+                transcript={transcript}
+                meetingTitle={meetingId}
+                meetingDate={meetingDate}
               />
             </div>
           </div>

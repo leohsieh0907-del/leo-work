@@ -174,6 +174,49 @@ export interface TranslateRequest {
   targetLanguage: TargetLanguage;
 }
 
+// ─────────────── 客製匯出（Word / Excel / PPT 共用文件模型）───────────────
+
+/** 匯出目標格式。 */
+export type ExportFormat = "docx" | "xlsx" | "pptx";
+
+/**
+ * 通用文件區塊：Word / Excel / PPT 共用的中介模型。
+ * AI 客製匯出時由 Gemini 依「格式＋使用者指示」產出這些區塊，前端再渲染成對應檔案。
+ * 用扁平結構（type 判別 + 選填欄位）以利 Gemini responseSchema 穩定輸出。
+ */
+export interface DocBlock {
+  type: "heading" | "paragraph" | "bullets" | "table";
+  /** heading / paragraph 的文字 */
+  text?: string;
+  /** bullets 的條列項 */
+  items?: string[];
+  /** table 表頭 */
+  columns?: string[];
+  /** table 資料列（每列為一組儲存格字串） */
+  rows?: string[][];
+}
+
+export interface ComposedDoc {
+  title: string;
+  blocks: DocBlock[];
+}
+
+/** AI 客製匯出請求：把會議資料＋使用者指示交給 Gemini，依目標格式重組成 ComposedDoc。 */
+export interface ComposeExportRequest {
+  format: ExportFormat;
+  /** 使用者白話指示（語氣、重點取捨、增刪欄位/段落…） */
+  instruction: string;
+  title: string;
+  date: string;
+  analysis: ProactiveAnalysis | null;
+  actionItems: ActionItem[];
+  transcript?: string;
+}
+
+export interface ComposeExportResponse {
+  doc: ComposedDoc;
+}
+
 /** 統一 API 失敗回應。 */
 export interface ApiErrorBody {
   error: { code: ErrorCode; message: string; details?: unknown };
