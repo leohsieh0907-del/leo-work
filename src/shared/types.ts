@@ -185,8 +185,8 @@ export type ExportFormat = "docx" | "xlsx" | "pptx";
  * 用扁平結構（type 判別 + 選填欄位）以利 Gemini responseSchema 穩定輸出。
  */
 export interface DocBlock {
-  type: "heading" | "paragraph" | "bullets" | "table";
-  /** heading / paragraph 的文字 */
+  type: "heading" | "paragraph" | "bullets" | "table" | "chart";
+  /** heading / paragraph 的文字；chart 時為圖表標題 */
   text?: string;
   /** bullets 的條列項 */
   items?: string[];
@@ -194,6 +194,12 @@ export interface DocBlock {
   columns?: string[];
   /** table 資料列（每列為一組儲存格字串） */
   rows?: string[][];
+  /** chart：圖表類型（目前 PPT 才會渲染成原生圖表，其餘格式退化成資料表） */
+  chartType?: "bar" | "line" | "pie";
+  /** chart：X 軸 / 圓餅的分類標籤 */
+  categories?: string[];
+  /** chart：一或多組數據（每組對齊 categories 的數值） */
+  series?: { name: string; values: number[] }[];
 }
 
 export interface ComposedDoc {

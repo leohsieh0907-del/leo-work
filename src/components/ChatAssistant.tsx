@@ -122,21 +122,31 @@ export default function ChatAssistant({
         actionItems,
         transcript,
       };
-      if (aiMode) {
-        const { doc } = await composeExport({
-          format: kind,
-          instruction: input.trim(),
-          history: messages,
-          title: data.title,
-          date: data.date,
-          analysis,
-          actionItems,
-          transcript,
-        });
-        await m.exportComposed(doc, kind, data);
-      } else {
+      const fallback = () => {
         const fn = kind === "docx" ? m.exportDocx : kind === "xlsx" ? m.exportXlsx : m.exportPptx;
-        await fn(data);
+        return fn(data);
+      };
+      if (aiMode) {
+        try {
+          const { doc } = await composeExport({
+            format: kind,
+            instruction: input.trim(),
+            history: messages,
+            title: data.title,
+            date: data.date,
+            analysis,
+            actionItems,
+            transcript,
+          });
+          if (doc.blocks?.length) await m.exportComposed(doc, kind, data);
+          else throw new Error("AI 回應為空");
+        } catch {
+          // AI 重組失敗（過載/安全過濾 RECITATION/空回應）→ 退回預設範本，至少產出檔案
+          setExportErr("AI 重組沒成功（可能過載或被安全過濾），已用預設範本匯出，可再試一次");
+          await fallback();
+        }
+      } else {
+        await fallback();
       }
     } catch (e) {
       setExportErr(e instanceof Error ? e.message : "匯出失敗");

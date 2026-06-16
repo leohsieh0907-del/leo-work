@@ -91,6 +91,40 @@ function docxTable(columns: string[], rows: string[][]): Table {
   return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: trows });
 }
 
+/**
+ * 數值表自動轉圖表規格（PPT 用）：第一欄當分類，其餘欄「整欄都是數字」才成立。
+ * 讓 Gemini 只要產出表格（它很穩），PPT 就能自動畫圖，不必依賴它主動選 chart 區塊。
+ */
+function tableToChart(
+  columns: string[],
+  rows: string[][],
+): { chartType: "bar" | "pie"; categories: string[]; series: { name: string; values: number[] }[] } | null {
+  if (columns.length < 2 || rows.length < 2) return null;
+  const parse = (c: string) => {
+    const cleaned = String(c ?? "").replace(/[^0-9.\-]/g, ""); // 去「萬/%/$/,」等單位
+    return cleaned === "" ? NaN : Number(cleaned);
+  };
+  const valueCols = columns.slice(1);
+  const series = valueCols.map((name, ci) => ({ name, values: rows.map((r) => parse(r[ci + 1])) }));
+  const allNumeric = series.every((s) => s.values.every((v) => Number.isFinite(v)));
+  if (!allNumeric) return null;
+  return {
+    chartType: valueCols.length === 1 ? "pie" : "bar",
+    categories: rows.map((r) => String(r[0] ?? "")),
+    series,
+  };
+}
+
+/** chart 區塊在非 PPT 格式退化成資料表（不丟資料）。 */
+function chartToTable(b: DocBlock): { columns: string[]; rows: string[][] } {
+  const cats = b.categories ?? [];
+  const series = b.series ?? [];
+  return {
+    columns: ["項目", ...series.map((s) => s.name)],
+    rows: cats.map((c, i) => [c, ...series.map((s) => String(s.values[i] ?? ""))]),
+  };
+}
+
 async function renderDocx(doc: ComposedDoc, fileBase: string): Promise<void> {
   const body: (Paragraph | Table)[] = [new Paragraph({ text: doc.title, heading: HeadingLevel.TITLE })];
   for (const b of doc.blocks) {
@@ -102,6 +136,10 @@ async function renderDocx(doc: ComposedDoc, fileBase: string): Promise<void> {
       (b.items ?? []).forEach((it) => body.push(new Paragraph({ text: it, bullet: { level: 0 } })));
     } else if (b.type === "table") {
       body.push(docxTable(b.columns ?? [], b.rows ?? []));
+    } else if (b.type === "chart") {
+      if (b.text) body.push(new Paragraph({ text: b.text, heading: HeadingLevel.HEADING_2 }));
+      const t = chartToTable(b);
+      body.push(docxTable(t.columns, t.rows));
     }
   }
   const docx = new Document({ sections: [{ children: body }] });
@@ -148,6 +186,12 @@ async function renderXlsx(doc: ComposedDoc, fileBase: string): Promise<void> {
       const ws = wb.addWorksheet(uniqName(lastHeading || "資料表"));
       if (b.columns?.length) ws.addRow(b.columns).font = { bold: true };
       (b.rows ?? []).forEach((r) => ws.addRow(r));
+      autoWidth(ws);
+    } else if (b.type === "chart") {
+      const t = chartToTable(b);
+      const ws = wb.addWorksheet(uniqName(b.text || lastHeading || "圖表資料"));
+      ws.addRow(t.columns).font = { bold: true };
+      t.rows.forEach((r) => ws.addRow(r));
       autoWidth(ws);
     }
   }
@@ -210,6 +254,31 @@ async function renderPptx(doc: ComposedDoc, fileBase: string): Promise<void> {
       if (rows.length) {
         s.addTable(rows, { x: 0.5, y, w: 12, fontSize: 12, border: { type: "solid", color: "CBD5E1", pt: 1 } });
         y += Math.min(4.5, rows.length * 0.4 + 0.3);
+      }
+      // 數值表 → 自動補一張圖表投影片（不依賴 Gemini 主動選 chart）
+      const auto = tableToChart(b.columns ?? [], b.rows ?? []);
+      if (auto) {
+        const cs = pptx.addSlide();
+        cs.addText(`${b.columns?.[0] ?? "資料"} 圖表`, { x: 0.5, y: 0.3, w: "90%", fontSize: 22, bold: true });
+        const data = auto.series.map((se) => ({ name: se.name, labels: auto.categories, values: se.values }));
+        cs.addChart(auto.chartType, data, {
+          x: 0.5, y: 1.1, w: 11, h: 4.8, showLegend: true, legendPos: "b", showTitle: false,
+        });
+      }
+    } else if (b.type === "chart") {
+      const series = b.series ?? [];
+      const cats = b.categories ?? [];
+      if (series.length && cats.length) {
+        if (b.text) {
+          s.addText(b.text, { x: 0.5, y, w: "90%", fontSize: 16, bold: true });
+          y += 0.5;
+        }
+        const data = series.map((se) => ({ name: se.name, labels: cats, values: se.values }));
+        const h = Math.max(2.5, Math.min(4.5, 7 - y));
+        s.addChart(b.chartType ?? "bar", data, {
+          x: 0.5, y, w: 11, h, showLegend: true, legendPos: "b", showTitle: false,
+        });
+        y += h + 0.2;
       }
     }
   }

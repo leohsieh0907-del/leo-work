@@ -71,11 +71,24 @@ const COMPOSED_DOC_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          type: { type: "string", enum: ["heading", "paragraph", "bullets", "table"] },
+          type: { type: "string", enum: ["heading", "paragraph", "bullets", "table", "chart"] },
           text: { type: "string" },
           items: { type: "array", items: { type: "string" } },
           columns: { type: "array", items: { type: "string" } },
           rows: { type: "array", items: { type: "array", items: { type: "string" } } },
+          chartType: { type: "string", enum: ["bar", "line", "pie"] },
+          categories: { type: "array", items: { type: "string" } },
+          series: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                values: { type: "array", items: { type: "number" } },
+              },
+              required: ["name", "values"],
+            },
+          },
         },
         required: ["type"],
       },
@@ -139,33 +152,37 @@ export class GeminiLlmService implements LlmService {
       },
     };
 
-    let resp: Response;
-    try {
-      resp = await fetchGeminiWithRetry(url, body);
-    } catch (e) {
-      throw new AppError(
-        ErrorCode.CLAUDE_API_ERROR,
-        `無法連線到 Gemini API：${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
+    // 空回應多半是 RECITATION 安全過濾誤判（HTTP 200 但 content 為空）；換一次再試，最多 3 次。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let resp: Response;
+      try {
+        resp = await fetchGeminiWithRetry(url, body);
+      } catch (e) {
+        throw new AppError(
+          ErrorCode.CLAUDE_API_ERROR,
+          `無法連線到 Gemini API：${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
 
-    const data = (await resp.json().catch(() => null)) as
-      | {
-          candidates?: { content?: { parts?: { text?: string }[] } }[];
-          error?: { message?: string };
-        }
-      | null;
+      const data = (await resp.json().catch(() => null)) as
+        | {
+            candidates?: { content?: { parts?: { text?: string }[] } }[];
+            error?: { message?: string };
+          }
+        | null;
 
-    if (!resp.ok) {
-      const msg = data?.error?.message ?? `HTTP ${resp.status}`;
-      throw new AppError(ErrorCode.CLAUDE_API_ERROR, `Gemini API 錯誤：${msg}`);
-    }
+      if (!resp.ok) {
+        const msg = data?.error?.message ?? `HTTP ${resp.status}`;
+        throw new AppError(ErrorCode.CLAUDE_API_ERROR, `Gemini API 錯誤：${msg}`);
+      }
 
-    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-    if (!text) {
-      throw new AppError(ErrorCode.CLAUDE_API_ERROR, "Gemini 回應為空（可能被安全過濾或額度用盡）");
+      const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      if (text) return text;
     }
-    return text;
+    throw new AppError(
+      ErrorCode.CLAUDE_API_ERROR,
+      "Gemini 回應為空（可能被安全過濾 RECITATION 或額度用盡）",
+    );
   }
 
   async generateProactiveAnalysis(
@@ -353,15 +370,18 @@ export class GeminiLlmService implements LlmService {
       req.format === "xlsx"
         ? "這是 Excel：盡量用 table 區塊承載結構化資料（每個 table 會變成一張工作表），少用長段落。"
         : req.format === "pptx"
-          ? "這是 PPT 簡報：要精簡。用 heading 當投影片標題、bullets 當要點（每個 heading 會開一張新投影片）；文字短、條列化，不要長段落。"
+          ? "這是 PPT 簡報：要精簡。用 heading 當投影片標題、bullets 當要點（每個 heading 會開一張新投影片）；文字短、條列化，不要長段落。\n" +
+            "**數字一律放表格（重要）**：凡可量化的數字（預算、金額、數量、佔比、時程、指標等），" +
+            "**請整理成 table（第一欄＝項目名稱，其餘欄＝純數值），不要只把數字塞在 bullets 文字裡**。" +
+            "系統會自動把這種數值表畫成圖表（單一數值欄→圓餅、多欄→長條）。沒有真實數字時不要硬湊。"
           : "這是 Word 文件：可用 heading 分節、paragraph 寫敘述、bullets 列重點、table 放結構化資料。";
 
     const system =
       `你是專業的會議文件製作助理，要把會議資料整理成一份「${fmtName}」的內容（結構化區塊）。\n` +
-      "嚴格遵守使用者指示（語氣、重點取捨、要不要新增欄位/段落等）。\n" +
-      "只能依據提供的會議資料，不可虛構事實；使用者要求新增的欄位若資料沒有，留空或標『未提供』。\n" +
+      "嚴格遵守使用者指示（語氣、重點取捨、要不要新增欄位/段落、要不要畫圖等）。\n" +
+      "只能依據提供的會議資料，不可虛構事實或捏造數字；使用者要求新增的欄位若資料沒有，留空或標『未提供』。\n" +
       fmtRule +
-      "\n區塊類型：heading(填 text)、paragraph(填 text)、bullets(填 items[])、table(填 columns[] 與 rows[][])。\n" +
+      "\n區塊類型：heading(填 text)、paragraph(填 text)、bullets(填 items[])、table(填 columns[] 與 rows[][])、chart(填 chartType、categories[]、series[])。\n" +
       "title 為文件標題。全程使用繁體中文，只輸出 JSON。";
 
     const source = [
@@ -417,6 +437,19 @@ function normalizeComposedDoc(obj: Record<string, unknown>, fallbackTitle: strin
         ? r.rows.map((row) => toStrArray(row)).filter((row) => row.length > 0)
         : [];
       if (columns.length || rows.length) blocks.push({ type: "table", columns, rows });
+    } else if (r.type === "chart") {
+      const chartType = r.chartType === "line" || r.chartType === "pie" ? r.chartType : "bar";
+      const categories = toStrArray(r.categories);
+      const series = toSeries(r.series);
+      if (categories.length && series.length) {
+        blocks.push({
+          type: "chart",
+          chartType,
+          text: String(r.text ?? "").trim() || undefined,
+          categories,
+          series,
+        });
+      }
     }
   }
   return { title: String(obj.title ?? "").trim() || fallbackTitle, blocks };
@@ -437,6 +470,20 @@ async function fetchGeminiWithRetry(url: string, body: unknown, retries = 2): Pr
     if (resp.ok || attempt >= retries || !transient.has(resp.status)) return resp;
     await new Promise((r) => setTimeout(r, (attempt + 1) * 800)); // 退避：0.8s、1.6s
   }
+}
+
+/** 解析 chart 的 series：[{name, values:number[]}]，濾掉空/壞資料。 */
+function toSeries(v: unknown): { name: string; values: number[] }[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+    .map((s) => ({
+      name: String(s.name ?? "").trim() || "數據",
+      values: Array.isArray(s.values)
+        ? s.values.map((n) => Number(n)).filter((n) => Number.isFinite(n))
+        : [],
+    }))
+    .filter((s) => s.values.length > 0);
 }
 
 /** 安全解析成物件（responseSchema 下通常已是乾淨 JSON；仍防呆）。 */

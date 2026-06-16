@@ -113,6 +113,8 @@ Leo work/
 - **共用中介模型 `ComposedDoc`**（heading/paragraph/bullets/table 區塊，定義於 `shared/types.ts`）→ 三種格式都從同一份區塊渲染。
 - **預設範本（沒跟 AI 討論就直接匯出）**：本機把分析結果排版，零 API。Word＝完整記錄含逐字稿；Excel＝概要＋各表獨立工作表；PPT＝封面＋每節一張投影片。
 - **AI 客製（與 AI 討論完再產出）**：先在助理裡多輪跟 Gemini 討論要怎麼整理 → 點格式鈕 → sidecar `/export/compose` 交 **Gemini**（`composeExportDoc`，responseSchema 強制 JSON）依「**討論脈絡(history)** ＋格式＋會議資料」重組成 `ComposedDoc` 再渲染。只打一句沒送出也算最後指示（等於一次性客製）。例：「PPT 只放結論和數字」「Word 公文語氣加風險建議」「Excel 行動方針多一欄優先級」。需 `GEMINI_API_KEY`，產檔時多一次 Gemini 呼叫（免費額度內）。
+- **圖表（PPT）**：`ComposedDoc` 有 `chart` 區塊型別，PPT 用 `pptxgenjs` 渲染成**原生可編輯圖表**（Word/Excel 退化成資料表，不丟資料）。但 Gemini 常不主動選 chart、且結構化輸出偶發 RECITATION 過濾 → 因此**主要靠「自動把數值表格畫成圖」**：只要 AI 把數字整理成 table（第一欄項目＋其餘欄純數值，這它很穩），`exporters.ts` 的 `tableToChart` 就在 PPT 自動補一張圖表投影片（單欄→圓餅、多欄→長條）。所以「畫成圖」要走 PPT。
+- **韌性**：AI 重組失敗（過載／RECITATION 空回應）時，前端**自動退回預設範本**匯出，至少產得出檔、不會卡住（會提示可再試一次）。
 
 ### 6) 整頁「記憶聊天」（跨會議記憶）
 App 頂部分頁「🦉 記憶聊天」（`MemoryChat.tsx`，不掛 `RouterPanel`）：純跨會議記憶問答，**不綁當前會議**。
@@ -251,3 +253,4 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 - 首次使用 `local` 嵌入會自動下載 all-MiniLM 模型到本地快取（之後離線）。
 - macOS 打包的 `icon.icns` 未附；在 mac 上以 `npm run tauri icon` 產生。
 - **Gemini 暫時過載自動重試**：`GeminiLlmService` 對 429／5xx（如「This model is currently experiencing high demand」）會退避重試最多 2 次（0.8s、1.6s），分析/聊天/匯出/轉錄不會一遇過載就失敗；仍失敗才回紅字錯誤。
+- **Gemini RECITATION 空回應**：`gemini-3.5-flash`（thinking 模型）結構化輸出偶發觸發「疑似抄襲」安全過濾（HTTP 200 但 content 空、`finishReason:RECITATION`，多為誤判），約 1/3 機率。`generate()` 遇空回應**自動換一次再試最多 3 次**壓低機率；匯出端再加一層退回預設範本，確保不卡死。圖表因此不直接依賴 Gemini 主動畫，改走「數值表格自動轉圖」更穩。
