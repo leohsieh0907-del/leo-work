@@ -23,16 +23,27 @@
 - **Gemini 過載**：`fetchGeminiWithRetry`（429/5xx 退避重試 2 次）包住 generate/transcribe/chat（解「This model is currently experiencing high demand」）。
 - 全程驗證：typecheck ×2 exit 0、vitest 95/95、vite build OK；圖表/compose 多次對真 Gemini 端到端實測（暫存腳本測完即刪）。
 
-### 目前狀態
-- 6 個 commit 全在本機 `main`，**未 push（repo 無 remote）**。`.docx` 個人筆記維持未追蹤。
-- 文件（README、skill `proactor-recorder`）已同步。
-- **preview 連不到本機 sidecar（雷 #10）持續** → UI 實機操作未由我驗證。
+### 續（同日，額度/容錯收尾）— 共再 +3 commit，已實機驗收通過 ✅
+7. **`bf3cec3`** Gemini 429 先改「不重試」（避免額度用完還硬打更快燒光）+ 寫本 worklog。
+8. **`719488e` 429 智慧重試**：`parse429RetryMs` 讀回應 `retryDelay`/「retry in Ns」——**短等待 ≤15s（每分鐘 RPM）就等一下自動再試**、長等待（每日上限）直接回報；5xx 維持退避重試。
+9. **`ccc534d` 省額度 + 友善錯誤**：`GeminiLlmService.analyzeAll`（選配介面方法）把「分析＋行動方針」**併成 1 個請求**（原本 2 個，`/analyze` 砍半用量；Ollama/Claude 無此法→退回 2 呼叫）；`geminiErrorMessage` 把 429 轉**中文友善提示**（每分鐘約 N 秒／每日約 N 分鐘恢復）。
 
-### 待辦 / 下一步（未做）
-- **庭晰在 `localhost:1420` 實機驗收**：Office 匯出下載、PPT 圖表、AI 助理聊+匯出+放大、QR 收放、收音列在 header、Gemini 過載/RECITATION 自動撐過。
-- （選）Word/Excel 也加原生圖表（Word 需 Chart.js 畫成圖片嵌入；Excel `exceljs` 不支援原生圖表，只能嵌圖片）。目前只 PPT。
-- （選）skill 鏡像 `docs/maintenance-skill.md` 已 drift（122 行 vs 正本），未同步；要保留鏡像需整份重鏡像。
-- （選）上 GitHub（建私有 repo + 放行 token → 加乾淨 remote）。
+**踩過的雷（新增）**：
+- **🕳️ Gemini 免費額度是 per-帳號/專案**：同帳號建新 key **不會增加額度**。庭晰最後**用另一個 Google 帳號**開 key（獨立額度）才順。建 key 走 AI Studio (`aistudio.google.com/apikey`) 最簡單；Cloud Console 要先啟用「Generative Language API」才會出現在金鑰限制清單。
+- **🕳️ `.env` `GEMINI_MODEL` 重複前綴**：庭晰手改成 `GEMINI_MODEL=GEMINI_MODEL=gemini-2.5-flash`（多打一次 key 名）→ Gemini 回「unexpected model name format」。修法：值只留 `gemini-2.5-flash`。改 `.env` 一律要**重啟 sidecar**（dotenv 只在啟動讀）。
+- **RPM 限流訊息「Please retry in 8.6s/59s」＝每分鐘窗口**（非每日用光），等幾秒～1 分鐘恢復；連點會一直撞同窗口。
+
+### 目前狀態（最終）
+- **共 9 個 commit**全在本機 `main`，**未 push（repo 無 remote）**。`.docx` 個人筆記維持未追蹤。
+- `.env`：`LLM_PROVIDER=gemini`、`GEMINI_MODEL=gemini-2.5-flash`、`GEMINI_API_KEY`＝**庭晰另一帳號的新 key（獨立免費額度）**。
+- 文件（README、skill `proactor-recorder`）已同步。
+- **✅ 庭晰已在 `localhost:1420` 實機驗收通過**（分析/匯出/圖表/合併面板/收音列/容錯，新 key＋分析砍半下順跑）。
+
+### 待辦 / 下一步（未做，皆選配）
+- Word/Excel 也加原生圖表（Word 需 Chart.js 畫圖片嵌入；Excel `exceljs` 不支援原生圖表，只能嵌圖片）。目前只 PPT。
+- skill 鏡像 `docs/maintenance-skill.md` 已 drift（122 行 vs 正本），未同步；要保留鏡像需整份重鏡像。
+- 上 GitHub（建私有 repo + 放行 token → 加乾淨 remote）。
+- （想再省額度）chat/compose 仍走 Gemini；要支援 Claude/Ollama 接手聊天+匯出需把 `/chat`、`/export/compose` 改成跟 `LLM_PROVIDER`（轉錄/即時逐字稿無法給 Claude）。
 
 ---
 
