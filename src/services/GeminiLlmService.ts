@@ -29,7 +29,13 @@ export interface GeminiLlmOptions {
 }
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const GLA_HOST = "https://generativelanguage.googleapis.com";
+const API_BASE = `${GLA_HOST}/v1beta/models`;
+/**
+ * inline_data 受 Gemini ~20MB 請求上限（約 7–8 分鐘 16kHz 音訊）。超過此位元組數就改走
+ * Files API 上傳取得 file_uri。12MB（base64 後 ~16MB）穩在 20MB 請求上限內。
+ */
+const INLINE_MAX_BYTES = 12 * 1024 * 1024;
 
 // responseSchema（OpenAPI 子集）：強制 Gemini 回固定結構。
 const ANALYSIS_SCHEMA = {
@@ -328,15 +334,19 @@ export class GeminiLlmService implements LlmService {
             "原文已是中文的行不加括號。漏任何一句翻譯都算錯。";
     const system = base + "\n" + langRule;
     const url = `${API_BASE}/${this.model}:generateContent?key=${this.apiKey}`;
+    // 小檔直接 inline；大檔（超過 inline 安全上限）先上傳 Files API 取 file_uri，
+    // 避免長會議整檔精修被 ~20MB 請求上限擋下。
+    const approxBytes = Math.floor((audioBase64.length * 3) / 4);
+    const audioPart =
+      approxBytes > INLINE_MAX_BYTES
+        ? { file_data: { mime_type: mimeType, file_uri: await this.uploadAudio(audioBase64, mimeType) } }
+        : { inline_data: { mime_type: mimeType, data: audioBase64 } };
     const body = {
       system_instruction: { parts: [{ text: system }] },
       contents: [
         {
           role: "user",
-          parts: [
-            { inline_data: { mime_type: mimeType, data: audioBase64 } },
-            { text: "請逐字轉錄這段錄音。" },
-          ],
+          parts: [audioPart, { text: "請逐字轉錄這段錄音。" }],
         },
       ],
       generationConfig: { temperature: 0.1 },
@@ -366,6 +376,80 @@ export class GeminiLlmService implements LlmService {
       throw new AppError(ErrorCode.CLAUDE_API_ERROR, "Gemini 轉錄回應為空（音訊太短或格式不支援）");
     }
     return text.trim();
+  }
+
+  /**
+   * 大檔音訊走 Gemini Files API：resumable 上傳 → 輪詢到 ACTIVE → 回 file_uri。
+   * inline_data 受 ~20MB 請求上限，較長的整檔精修（>~8 分鐘）必須改用這條路。
+   * 檔案在 Google 端暫存 48 小時，轉錄完即可不管（不主動刪）。
+   */
+  private async uploadAudio(audioBase64: string, mimeType: string): Promise<string> {
+    const bytes = Buffer.from(audioBase64, "base64");
+
+    // 1) 開 resumable 上傳 session，從回應 header 取得上傳 URL
+    let startResp: Response;
+    try {
+      startResp = await fetch(`${GLA_HOST}/upload/v1beta/files?key=${this.apiKey}`, {
+        method: "POST",
+        headers: {
+          "X-Goog-Upload-Protocol": "resumable",
+          "X-Goog-Upload-Command": "start",
+          "X-Goog-Upload-Header-Content-Length": String(bytes.length),
+          "X-Goog-Upload-Header-Content-Type": mimeType,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ file: { display_name: "meeting-audio" } }),
+      });
+    } catch (e) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        `無法連線到 Gemini Files API：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    const uploadUrl = startResp.headers.get("x-goog-upload-url");
+    if (!startResp.ok || !uploadUrl) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        geminiErrorMessage("Gemini 上傳起始失敗：", startResp.status, `HTTP ${startResp.status}`),
+      );
+    }
+
+    // 2) 上傳位元組並 finalize
+    const upResp = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Length": String(bytes.length),
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+      },
+      body: bytes,
+    });
+    const upJson = (await upResp.json().catch(() => null)) as
+      | { file?: { name?: string; uri?: string; state?: string } }
+      | null;
+    const file = upJson?.file;
+    if (!upResp.ok || !file?.uri || !file?.name) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        geminiErrorMessage("Gemini 上傳失敗：", upResp.status, `HTTP ${upResp.status}`),
+      );
+    }
+
+    // 3) 輪詢直到 ACTIVE（音訊處理通常數秒；上限約 60s 防卡死）
+    let state = file.state ?? "PROCESSING";
+    for (let i = 0; state === "PROCESSING" && i < 30; i++) {
+      await sleep(2000);
+      const stResp = await fetch(`${GLA_HOST}/v1beta/${file.name}?key=${this.apiKey}`);
+      const stJson = (await stResp.json().catch(() => null)) as { state?: string } | null;
+      state = stJson?.state ?? state;
+    }
+    if (state !== "ACTIVE") {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        "Gemini 音檔處理逾時或失敗，請改用較短的收音或稍後再試。",
+      );
+    }
+    return file.uri;
   }
 
   /**

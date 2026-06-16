@@ -50,10 +50,12 @@ const VU_THROTTLE_MS = 100;
 
 /**
  * 收音「整檔精修」緩衝上限（秒）。前景 session 期間累積 AGC 後的 PCM，停止後可編成
- * WAV 交 Gemini 整檔精修。超過上限就停止累積（保護記憶體，並避免超出 Gemini inline
- * 音訊大小限制）；超過時 recording 事件帶 truncated=true 提醒前端。
+ * WAV 交 Gemini 整檔精修。大檔已改走 Gemini Files API 上傳（見 GeminiLlmService.transcribeAudio），
+ * 不再受 inline ~20MB 請求上限約束；此上限主要保護記憶體與上傳/轉錄耗時。
+ * 超過上限就停止累積，recording 事件帶 truncated=true 提醒前端「只精修前 N 分鐘」。
+ * 注意：Float32 緩衝約 64KB/秒，3600 秒 ≈ 230MB；要再加長需評估記憶體與上傳時間。
  */
-const MAX_RECORD_SECONDS = 600;
+const MAX_RECORD_SECONDS = 3600; // 60 分鐘（線上會議常見長度）
 const MAX_RECORD_SAMPLES = MAX_RECORD_SECONDS * TARGET_SAMPLE_RATE;
 
 /**
