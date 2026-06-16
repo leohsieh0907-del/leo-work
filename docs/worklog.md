@@ -41,7 +41,7 @@
 
 ### 待辦 / 下一步（未做，皆選配）
 - Word/Excel 也加原生圖表（Word 需 Chart.js 畫圖片嵌入；Excel `exceljs` 不支援原生圖表，只能嵌圖片）。目前只 PPT。
-- skill 鏡像 `docs/maintenance-skill.md` 已 drift（122 行 vs 正本），未同步；要保留鏡像需整份重鏡像。
+- ~~skill 鏡像 `docs/maintenance-skill.md` 已 drift（122 行 vs 正本），未同步~~ → **2026-06-16 已整份重新同步**（補齊 analyzeAll/429 重試/RECITATION/GEMINI_MODEL 共用/合併面板/MemoryChat/exporters/PPT 圖表/雷 #10，測試數 84→95）。
 - 上 GitHub（建私有 repo + 放行 token → 加乾淨 remote）。
 - （想再省額度）chat/compose 仍走 Gemini；要支援 Claude/Ollama 接手聊天+匯出需把 `/chat`、`/export/compose` 改成跟 `LLM_PROVIDER`（轉錄/即時逐字稿無法給 Claude）。
 
