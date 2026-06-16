@@ -252,5 +252,5 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 - **正式版 sidecar 打包**：`npm run build:sidecar` 產出 `server.cjs`；要隨 Tauri 打包，需將其（連同 node 或用 `pkg`/`bun --compile` 包成單一執行檔）設為 Tauri `externalBin` 並於 `lib.rs` 以 shell plugin spawn。目前 dev 由 `concurrently` 啟動。
 - 首次使用 `local` 嵌入會自動下載 all-MiniLM 模型到本地快取（之後離線）。
 - macOS 打包的 `icon.icns` 未附；在 mac 上以 `npm run tauri icon` 產生。
-- **Gemini 暫時過載自動重試**：`GeminiLlmService` 對 429／5xx（如「This model is currently experiencing high demand」）會退避重試最多 2 次（0.8s、1.6s），分析/聊天/匯出/轉錄不會一遇過載就失敗；仍失敗才回紅字錯誤。
+- **Gemini 暫時過載自動重試**：`GeminiLlmService` 對 **5xx 伺服器過載**（如「This model is currently experiencing high demand」）退避重試最多 2 次（0.8s、1.6s）。**429 不重試**——429 多為免費額度/限流用盡（`free_tier_requests`），再打只會更快燒光額度且短退避救不了，直接回報請使用者稍候 1 分鐘或換模型（改 `.env` `GEMINI_MODEL`）。
 - **Gemini RECITATION 空回應**：`gemini-3.5-flash`（thinking 模型）結構化輸出偶發觸發「疑似抄襲」安全過濾（HTTP 200 但 content 空、`finishReason:RECITATION`，多為誤判），約 1/3 機率。`generate()` 遇空回應**自動換一次再試最多 3 次**壓低機率；匯出端再加一層退回預設範本，確保不卡死。圖表因此不直接依賴 Gemini 主動畫，改走「數值表格自動轉圖」更穩。

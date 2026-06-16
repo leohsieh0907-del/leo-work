@@ -6,6 +6,36 @@
 
 ---
 
+## 2026-06-16 — 匯出 Word/Excel/PPT（含 AI 客製＋PPT 自動圖表）+ AI 面板合併 + 收音列移上 header + Gemini 容錯
+
+### 這段做了什麼（共 6 個 commit）
+1. **`ba1f772`** 先把續4 未提交的「整頁記憶聊天 + LLM 升 3.5-flash」commit；同步修文件（CLAUDE.md 測試數 84→95、README 補 MemoryChat/目錄名改 Leo work/GEMINI_MODEL 註現值）。
+2. **`92461fb` 匯出 Word/Excel/PPT**：新 `src/lib/exporters.ts`，瀏覽器端離線產檔（`docx`/`exceljs`/`pptxgenjs`），按鈕原放分析面板、**動態 import**（按了才載、切獨立 chunk，主程式維持 ~182KB）。**棄用 SheetJS `xlsx`（high 無修補 CVE）改 `exceljs`**。順手把手機 QR 做成可收放（避免擋位置）。
+3. **`fc42888` AI 客製「討論完再產出」**：`ComposeExportRequest` 加 `history`；`composeExportDoc`（responseSchema 強制 JSON）依「討論＋格式＋會議資料」重組成通用 `ComposedDoc`（heading/paragraph/bullets/table）再渲染。
+4. **`1a73d7b` 合併兩個重複 AI 面板**：原本「分析面板裡的討論框」與「底部🦉AI 助理」功能重複 → 併成單一 `ChatAssistant`（聊天＋匯出一體），全寬底部、預設展開、加放大鈕；`AnalysisPanel` 回歸純顯示。
+5. **`251ebad` 收音列移上 header**：`RouterPanel` 拆 `RouterBar`（控制列→併進頂部 header）＋`RouterDetails`（QR/藍牙/即時稿→下方、無內容不顯示），省一條橫列。同 commit 加 Gemini 過載重試。
+6. **`fe51023` PPT 自動圖表 + 容錯**：見下「關鍵決定」。
+
+### 關鍵決定 / 踩過的雷（重要）
+- **🕳️ Gemini RECITATION 空回應**：`gemini-3.5-flash`（thinking）做 responseSchema 結構化輸出時，**約 1/3 機率被「疑似抄襲」安全過濾清空**（HTTP 200、content 空、`finishReason:RECITATION`、亂引維基，誤判）。對策：`generate()` 遇空回應**自動重試最多 3 次**；匯出端 AI 失敗/空 blocks **退回預設範本**不卡死。**別在 prompt 放 JSON 範例**（更易觸發 RECITATION）。
+- **圖表怎麼產**：Gemini 常不主動選 `chart` 區塊、又有 RECITATION → **不依賴它畫圖**。改在 `exporters.ts` `tableToChart`：PPT 把「數值表格」（首欄項目＋其餘欄純數字）**自動畫成圖**（單欄→pie、多欄→bar，`pptx.addChart` 原生）；提示改「數字一律放 table」（它做表很穩）。**目前圖表只有 PPT**（Word/Excel 是資料表）。`chart` 區塊型別與 schema 仍保留。
+- **pptxgenjs**：ESM build `export { PptxGenJS as default }` → 瀏覽器 `new pptxgen()` OK；Node/tsx 測試要 `(await import).default`。
+- **Gemini 過載**：`fetchGeminiWithRetry`（429/5xx 退避重試 2 次）包住 generate/transcribe/chat（解「This model is currently experiencing high demand」）。
+- 全程驗證：typecheck ×2 exit 0、vitest 95/95、vite build OK；圖表/compose 多次對真 Gemini 端到端實測（暫存腳本測完即刪）。
+
+### 目前狀態
+- 6 個 commit 全在本機 `main`，**未 push（repo 無 remote）**。`.docx` 個人筆記維持未追蹤。
+- 文件（README、skill `proactor-recorder`）已同步。
+- **preview 連不到本機 sidecar（雷 #10）持續** → UI 實機操作未由我驗證。
+
+### 待辦 / 下一步（未做）
+- **庭晰在 `localhost:1420` 實機驗收**：Office 匯出下載、PPT 圖表、AI 助理聊+匯出+放大、QR 收放、收音列在 header、Gemini 過載/RECITATION 自動撐過。
+- （選）Word/Excel 也加原生圖表（Word 需 Chart.js 畫成圖片嵌入；Excel `exceljs` 不支援原生圖表，只能嵌圖片）。目前只 PPT。
+- （選）skill 鏡像 `docs/maintenance-skill.md` 已 drift（122 行 vs 正本），未同步；要保留鏡像需整份重鏡像。
+- （選）上 GitHub（建私有 repo + 放行 token → 加乾淨 remote）。
+
+---
+
 ## 2026-06-15（續4）— 新增整頁「記憶聊天」+ LLM 升 gemini-3.5-flash
 
 ### 這段做了什麼

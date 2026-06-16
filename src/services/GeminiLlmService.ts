@@ -460,7 +460,9 @@ function normalizeComposedDoc(obj: Record<string, unknown>, fallbackTitle: strin
  * high demand"）時自動退避重試，最多 retries 次。非暫時性錯誤或成功直接回 Response。
  */
 async function fetchGeminiWithRetry(url: string, body: unknown, retries = 2): Promise<Response> {
-  const transient = new Set([429, 500, 502, 503, 504]);
+  // 只重試「伺服器過載」5xx；**不重試 429**——429 多為額度/限流用盡，再打只會更快燒光額度，
+  // 且免費層多為每分鐘/每日窗口，短退避也救不了，直接讓上層回報請使用者稍候或換模型。
+  const transient = new Set([500, 502, 503, 504]);
   for (let attempt = 0; ; attempt++) {
     const resp = await fetch(url, {
       method: "POST",
