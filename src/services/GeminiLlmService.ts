@@ -459,18 +459,49 @@ function normalizeComposedDoc(obj: Record<string, unknown>, fallbackTitle: strin
  * 呼叫 Gemini，遇暫時性過載/限流（429、5xx，例如 "This model is currently experiencing
  * high demand"）時自動退避重試，最多 retries 次。非暫時性錯誤或成功直接回 Response。
  */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 從 429 回應解析建議重試毫秒數（RetryInfo.retryDelay 或訊息「retry in Ns」）；無則 null。 */
+async function parse429RetryMs(resp: Response): Promise<number | null> {
+  const data = (await resp.json().catch(() => null)) as
+    | { error?: { message?: string; details?: { retryDelay?: string }[] } }
+    | null;
+  const fromDetails = data?.error?.details
+    ?.map((d) => d?.retryDelay)
+    .find((s): s is string => typeof s === "string");
+  const m = /([\d.]+)\s*s/.exec(fromDetails ?? data?.error?.message ?? "");
+  return m ? Math.ceil(parseFloat(m[1]) * 1000) : null;
+}
+
+/**
+ * 呼叫 Gemini 並處理暫時性失敗：
+ *  - 5xx 伺服器過載 → 短退避重試（0.8s、1.6s）。
+ *  - 429 限流 → 讀「retry in Ns」：**短等待（每分鐘 RPM，≤15s）就等一下再試一次**；
+ *    長等待（每日上限）直接回報，不空轉燒額度。
+ * 其餘錯誤或重試用盡則回傳該 Response 由上層處理。
+ */
 async function fetchGeminiWithRetry(url: string, body: unknown, retries = 2): Promise<Response> {
-  // 只重試「伺服器過載」5xx；**不重試 429**——429 多為額度/限流用盡，再打只會更快燒光額度，
-  // 且免費層多為每分鐘/每日窗口，短退避也救不了，直接讓上層回報請使用者稍候或換模型。
-  const transient = new Set([500, 502, 503, 504]);
+  const overload = new Set([500, 502, 503, 504]);
   for (let attempt = 0; ; attempt++) {
     const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (resp.ok || attempt >= retries || !transient.has(resp.status)) return resp;
-    await new Promise((r) => setTimeout(r, (attempt + 1) * 800)); // 退避：0.8s、1.6s
+    if (resp.ok || attempt >= retries) return resp;
+
+    if (overload.has(resp.status)) {
+      await sleep((attempt + 1) * 800);
+      continue;
+    }
+    if (resp.status === 429) {
+      const waitMs = await parse429RetryMs(resp.clone()); // clone：留原 body 給上層讀
+      if (waitMs !== null && waitMs <= 15000) {
+        await sleep(waitMs + 500);
+        continue;
+      }
+    }
+    return resp;
   }
 }
 
