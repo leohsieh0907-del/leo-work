@@ -128,7 +128,9 @@ function broadcast(event: AudioEvent): void {
   }
 }
 
-const systemCapture = new SystemAudioCapture();
+// .env SYSTEM_LOOPBACK_DEVICE 可指定系統收音的 loopback 裝置（完整名稱或片段，如 "Voicemeeter Out B1"）；
+// 未設定時 pickLoopback 會自動偏好 VoiceMeeter B1 > CABLE > 任一 VoiceMeeter > 立體聲混音。
+const systemCapture = new SystemAudioCapture({ loopbackDevice: process.env.SYSTEM_LOOPBACK_DEVICE });
 const phoneBridge = new PhoneBridgeServer({ port: PHONE_PORT });
 const transcriber = new StreamingTranscriber({
   modelPath: process.env.WHISPER_MODEL_PATH,

@@ -251,10 +251,30 @@ export class SystemAudioCapture implements CaptureSource {
     return devices.inputs.find((name) => !loopbackSet.has(name));
   }
 
-  /** loopback：優先用指定值；否則取第一個候選；都沒有則 undefined。 */
+  /**
+   * loopback 來源挑選：
+   *  1. 指定值（建構時帶入，如 .env SYSTEM_LOOPBACK_DEVICE）優先——支援完整名稱或片段比對。
+   *  2. 否則依偏好順序挑：VoiceMeeter 的 B1 錄音匯流排 > VB-CABLE > 任一 VoiceMeeter
+   *     > 立體聲混音 > 其他。如此在「同時裝了 VoiceMeeter/CABLE 又留著 Stereo Mix」時，
+   *     才會固定抓到正確的虛擬錄音匯流排，而非 enumeration 順序隨機的第一個（戴藍牙錄音必備）。
+   *  3. 都沒有則 undefined（退化成只錄麥克風）。
+   */
   private pickLoopback(devices: AudioDeviceList): string | undefined {
-    if (this.loopbackDevice) return this.loopbackDevice;
-    return devices.loopbackCandidates[0];
+    const cands = devices.loopbackCandidates;
+    if (this.loopbackDevice) {
+      const want = this.loopbackDevice.toLowerCase();
+      const hit = cands.find((n) => n === this.loopbackDevice || n.toLowerCase().includes(want));
+      return hit ?? this.loopbackDevice;
+    }
+    if (cands.length === 0) return undefined;
+    const byKeyword = (kw: string) => cands.find((n) => n.toLowerCase().includes(kw));
+    return (
+      byKeyword("voicemeeter out b1") ??
+      byKeyword("cable output") ??
+      byKeyword("voicemeeter") ??
+      byKeyword("stereo mix") ??
+      cands[0]
+    );
   }
 
   // ─────────────── 私有：FFmpeg 參數組裝 ───────────────
@@ -342,26 +362,25 @@ function resolveFfmpegPath(): string | null {
 }
 
 /**
- * 解析 `ffmpeg -list_devices` 的 stderr。
- * 典型輸出（節錄）：
- *   [dshow @ ...] DirectShow video devices (some may be both video and audio devices)
- *   [dshow @ ...]  "HD WebCam"
- *   [dshow @ ...] DirectShow audio devices
- *   [dshow @ ...]  "麥克風 (Realtek High Definition Audio)"
- *   [dshow @ ...]  "立體聲混音 (Realtek High Definition Audio)"
- * 我們只收「audio devices」段落之後、引號內的裝置名稱。
+ * 解析 `ffmpeg -list_devices` 的 stderr，取出音訊輸入裝置名稱。
+ * 相容兩種 ffmpeg 輸出格式：
+ *   舊版：先印「DirectShow audio devices」區段標題，下面才列 "名稱"。
+ *   新版（目前 ffmpeg-static）：不印區段標題，改在每行尾標 (audio)/(video)，例如
+ *     [dshow @ ...] "Microphone Array (...)" (audio)
+ *     [dshow @ ...] "Stereo Mix (Realtek(R) Audio)" (audio)
+ *   兩者皆忽略「Alternative name ...」裝置路徑行。
  */
-function parseDshowDevices(stderr: string): AudioDeviceList {
+export function parseDshowDevices(stderr: string): AudioDeviceList {
   if (!stderr) return { inputs: [], loopbackCandidates: [] };
 
   const inputs: string[] = [];
   const seen = new Set<string>();
-  let inAudioSection = false;
+  let inAudioSection = false; // 舊版 ffmpeg 靠區段標題；新版改用行尾 (audio)/(video) 標籤
 
   for (const rawLine of stderr.split(/\r?\n/)) {
     const line = rawLine.trim();
 
-    // 區段切換：碰到 "audio devices" 開始收，碰到 "video devices" 停收
+    // 舊版區段標題（新版不印，但印了就沿用）
     if (/DirectShow\s+audio\s+devices/i.test(line)) {
       inAudioSection = true;
       continue;
@@ -370,15 +389,23 @@ function parseDshowDevices(stderr: string): AudioDeviceList {
       inAudioSection = false;
       continue;
     }
-    if (!inAudioSection) continue;
 
-    // 裝置名稱在雙引號內；忽略 "Alternative name ..." 那種裝置路徑行
+    // 忽略 "Alternative name ..." 那種裝置路徑行
     if (/alternative\s+name/i.test(line)) continue;
+
+    // 裝置名稱在雙引號內
     const match = line.match(/"([^"]+)"/);
     if (!match) continue;
-
     const name = match[1].trim();
-    if (!name || seen.has(name)) continue;
+    if (!name) continue;
+
+    // 判斷音訊：新版行尾標 (audio)/(video) 以標籤為準；沒標才退回舊版區段判斷。
+    const hasAudioTag = /\(audio\)\s*$/i.test(line);
+    const hasVideoTag = /\(video\)\s*$/i.test(line);
+    const isAudio = hasAudioTag || (!hasVideoTag && inAudioSection);
+    if (!isAudio) continue;
+
+    if (seen.has(name)) continue;
     seen.add(name);
     inputs.push(name);
   }
