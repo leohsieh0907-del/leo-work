@@ -4,9 +4,10 @@ import { useAudioStore } from "../store/audioStore";
 import { getPhoneSession } from "../lib/audioApi";
 import VuMeter from "./VuMeter";
 
-// ── 雙軌整合控制面板（AudioIngestionRouter）──
-// 四態狀態機 + 三來源切換（電腦系統 / 手機收音 / 藍牙同步）+ VU + 藍牙進度 + 即時逐字稿。
-// 「手機收音」走已驗證的 WSS 手機橋接（自簽 HTTPS + QR），點選後顯示 QR 供手機掃描。
+// ── 雙軌整合控制（AudioIngestionRouter）──
+// 拆成兩塊：RouterBar（精簡控制列，放在頂部 header）＋ RouterDetails（QR/藍牙進度/即時逐字稿，
+// 放在 header 下方，無內容時不顯示）。兩者共用 zustand 音訊 store。
+// 「手機收音」走已驗證的 WSS 手機橋接（自簽 HTTPS + QR），點選後在 RouterDetails 顯示 QR。
 
 const STATE_LABEL: Record<AudioSourceState, string> = {
   [AudioSourceState.DISCONNECTED]: "未連線",
@@ -28,21 +29,74 @@ const SOURCES: { id: AudioSourceId; label: string }[] = [
   { id: "bluetooth", label: "🔵 藍牙同步" },
 ];
 
-export default function RouterPanel() {
-  const { state, status, vu, transcript, error, busy, connect, activate, deactivate, syncBluetooth } =
-    useAudioStore();
+function isRealtime(state: AudioSourceState): boolean {
+  return state === AudioSourceState.WEBRTC_STREAMING || state === AudioSourceState.LOCAL_RECORDING;
+}
 
-  // 手機收音 QR session（手機掃描用）
-  const [phoneSession, setPhoneSession] = useState<PhoneSession | null>(null);
-  const [phoneSessionErr, setPhoneSessionErr] = useState<string | null>(null);
-  const [qrOpen, setQrOpen] = useState(true); // QR 可收放，避免擋位置（手機連上後可收起）
+/** 精簡控制列：狀態燈 + 來源切換 + 停止 + VU。放在頂部 header。 */
+export function RouterBar() {
+  const { state, status, vu, busy, connect, activate, deactivate, syncBluetooth } = useAudioStore();
 
   // 掛載時連上 /events
   useEffect(() => connect(), [connect]);
 
   const active = status?.activeSourceId ?? null;
-  const realtimeActive =
-    state === AudioSourceState.WEBRTC_STREAMING || state === AudioSourceState.LOCAL_RECORDING;
+  const realtimeActive = isRealtime(state);
+
+  function onSource(id: AudioSourceId) {
+    if (id === "bluetooth") void syncBluetooth(); // 藍牙走背景同步，即時串流中也可按
+    else void activate(id);
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${STATE_COLOR[state]}`} />
+      <span className="hidden shrink-0 text-xs font-medium text-slate-300 lg:inline">{STATE_LABEL[state]}</span>
+
+      <div className="inline-flex shrink-0 rounded-lg border border-white/10 bg-black/30 p-0.5">
+        {SOURCES.map((s) => (
+          <button
+            key={s.id}
+            disabled={busy}
+            onClick={() => onSource(s.id)}
+            className={`rounded-md px-2.5 py-1 text-xs transition ${
+              active === s.id ? "bg-brand text-white" : "text-slate-300 hover:text-white"
+            } disabled:opacity-50`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {realtimeActive && (
+        <button
+          onClick={() => void deactivate()}
+          disabled={busy}
+          className="flex shrink-0 items-center gap-1.5 rounded-md bg-brand-danger px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+        >
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+          停止
+        </button>
+      )}
+
+      {realtimeActive && (
+        <div className="hidden min-w-0 flex-1 md:block">
+          <VuMeter level={vu} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 細節區：手機 QR / 藍牙進度 / 即時逐字稿 / 錯誤。放在 header 下方，無內容時不顯示。 */
+export function RouterDetails() {
+  const { state, status, transcript, error } = useAudioStore();
+
+  const [phoneSession, setPhoneSession] = useState<PhoneSession | null>(null);
+  const [phoneSessionErr, setPhoneSessionErr] = useState<string | null>(null);
+  const [qrOpen, setQrOpen] = useState(true); // QR 可收放，避免擋位置
+
+  const realtimeActive = isRealtime(state);
   const phoneActive = state === AudioSourceState.WEBRTC_STREAMING;
 
   // 手機收音來源啟用時取 QR / token / 網址；停用時清掉。
@@ -65,57 +119,12 @@ export default function RouterPanel() {
     };
   }, [phoneActive]);
 
-  function onSource(id: AudioSourceId) {
-    if (id === "bluetooth") {
-      // 藍牙走「背景同步」：即時串流中也能按，會被列為低優先
-      void syncBluetooth();
-    } else {
-      void activate(id);
-    }
-  }
+  const liveTranscript = realtimeActive && transcript;
+  const hasContent = phoneActive || status?.bluetooth.transferring || liveTranscript || error;
+  if (!hasContent) return null;
 
   return (
     <div className="flex flex-col gap-3 border-b border-white/10 bg-brand-panel/60 px-5 py-3">
-      <div className="flex flex-wrap items-center gap-4">
-        {/* 四態狀態燈 */}
-        <div className="flex items-center gap-2 text-sm">
-          <span className={`inline-block h-2.5 w-2.5 rounded-full ${STATE_COLOR[state]}`} />
-          <span className="font-medium">{STATE_LABEL[state]}</span>
-        </div>
-
-        {/* 來源切換 */}
-        <div className="inline-flex rounded-lg border border-white/10 bg-black/30 p-0.5">
-          {SOURCES.map((s) => (
-            <button
-              key={s.id}
-              disabled={busy}
-              onClick={() => onSource(s.id)}
-              className={`rounded-md px-3 py-1.5 text-sm transition ${
-                active === s.id ? "bg-brand text-white" : "text-slate-300 hover:text-white"
-              } disabled:opacity-50`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {realtimeActive && (
-          <button
-            onClick={() => void deactivate()}
-            disabled={busy}
-            className="flex items-center gap-2 rounded-md bg-brand-danger px-4 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-          >
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white" />
-            停止
-          </button>
-        )}
-
-        {/* VU 訊號條 */}
-        <div className="min-w-[200px] flex-1">
-          <VuMeter level={realtimeActive ? vu : null} label="音量訊號" />
-        </div>
-      </div>
-
       {/* 手機收音：QR + 連線指引（可收放，避免擋位置）*/}
       {phoneActive && (
         <div className="rounded-md border border-white/10 bg-black/20">
@@ -140,7 +149,7 @@ export default function RouterPanel() {
                     <span>2. 首次會跳「憑證不受信任」→ 選繼續前往（自簽憑證，正常）</span>
                     <span>3. 開頁後按「開始傳送」，聲音即時回傳並轉成逐字稿</span>
                     <span className="mt-1 break-all text-slate-500">{phoneSession.url}</span>
-                    <span className="text-slate-500">手機開始傳送後，下方音量條會跳動、即時逐字稿會出現。</span>
+                    <span className="text-slate-500">手機開始傳送後，上方音量條會跳動、即時逐字稿會出現。</span>
                   </div>
                 </>
               ) : phoneSessionErr ? (
@@ -172,7 +181,7 @@ export default function RouterPanel() {
       )}
 
       {/* 即時逐字稿（手機收音、電腦即時看）*/}
-      {realtimeActive && transcript && (
+      {liveTranscript && (
         <div className="max-h-20 overflow-y-auto rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
           <span className="text-slate-500">即時逐字稿：</span> {transcript}
         </div>

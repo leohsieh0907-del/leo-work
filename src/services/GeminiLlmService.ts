@@ -141,11 +141,7 @@ export class GeminiLlmService implements LlmService {
 
     let resp: Response;
     try {
-      resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      resp = await fetchGeminiWithRetry(url, body);
     } catch (e) {
       throw new AppError(
         ErrorCode.CLAUDE_API_ERROR,
@@ -268,11 +264,7 @@ export class GeminiLlmService implements LlmService {
 
     let resp: Response;
     try {
-      resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      resp = await fetchGeminiWithRetry(url, body);
     } catch (e) {
       throw new AppError(
         ErrorCode.CLAUDE_API_ERROR,
@@ -322,17 +314,14 @@ export class GeminiLlmService implements LlmService {
     ];
 
     const url = `${API_BASE}/${this.model}:generateContent?key=${this.apiKey}`;
+    const body = {
+      system_instruction: { parts: [{ text: system }] },
+      contents,
+      generationConfig: { temperature: 0.3 },
+    };
     let resp: Response;
     try {
-      resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: system }] },
-          contents,
-          generationConfig: { temperature: 0.3 },
-        }),
-      });
+      resp = await fetchGeminiWithRetry(url, body);
     } catch (e) {
       throw new AppError(
         ErrorCode.CLAUDE_API_ERROR,
@@ -431,6 +420,23 @@ function normalizeComposedDoc(obj: Record<string, unknown>, fallbackTitle: strin
     }
   }
   return { title: String(obj.title ?? "").trim() || fallbackTitle, blocks };
+}
+
+/**
+ * 呼叫 Gemini，遇暫時性過載/限流（429、5xx，例如 "This model is currently experiencing
+ * high demand"）時自動退避重試，最多 retries 次。非暫時性錯誤或成功直接回 Response。
+ */
+async function fetchGeminiWithRetry(url: string, body: unknown, retries = 2): Promise<Response> {
+  const transient = new Set([429, 500, 502, 503, 504]);
+  for (let attempt = 0; ; attempt++) {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok || attempt >= retries || !transient.has(resp.status)) return resp;
+    await new Promise((r) => setTimeout(r, (attempt + 1) * 800)); // 退避：0.8s、1.6s
+  }
 }
 
 /** 安全解析成物件（responseSchema 下通常已是乾淨 JSON；仍防呆）。 */

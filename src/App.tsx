@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { health } from "./lib/api";
 import Workspace from "./components/Workspace";
-import RouterPanel from "./components/RouterPanel";
+import { RouterBar, RouterDetails } from "./components/RouterPanel";
 import MemoryChat from "./components/MemoryChat";
 
 // ── App 外殼：頂部狀態列 + 主工作區 ──
@@ -28,17 +28,17 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-white/10 bg-brand-panel px-5 py-3">
-        <div className="flex items-center gap-2">
+      <header className="flex items-center gap-3 border-b border-white/10 bg-brand-panel px-5 py-2.5">
+        <div className="flex shrink-0 items-center gap-2">
           <span className="text-brand-accent text-lg">◆</span>
           <h1 className="text-base font-semibold tracking-wide">Leo work</h1>
-          <span className="ml-2 rounded bg-white/5 px-2 py-0.5 text-xs text-slate-400">
+          <span className="ml-1 hidden rounded bg-white/5 px-2 py-0.5 text-xs text-slate-400 xl:inline">
             本地隱私 · 跨會議記憶
           </span>
         </div>
 
         {ready && (
-          <div className="inline-flex rounded-lg border border-white/10 bg-black/30 p-0.5 text-sm">
+          <div className="inline-flex shrink-0 rounded-lg border border-white/10 bg-black/30 p-0.5 text-sm">
             <button
               onClick={() => setView("workspace")}
               className={`rounded-md px-3 py-1.5 transition ${
@@ -58,14 +58,23 @@ export default function App() {
           </div>
         )}
 
-        <StatusPill ready={ready} />
+        {/* 收音控制列（移上來：併進 header，省一條橫列）*/}
+        {ready && view === "workspace" && (
+          <div className="min-w-0 flex-1">
+            <RouterBar />
+          </div>
+        )}
+
+        <div className="ml-auto shrink-0">
+          <StatusPill ready={ready} />
+        </div>
       </header>
 
       {ready ? (
         view === "workspace" ? (
           <div className="flex flex-1 flex-col overflow-hidden">
-            {/* 雙軌整合控制列（電腦系統 / 手機 WebRTC / 藍牙）+ 四態狀態 + VU */}
-            <RouterPanel />
+            {/* 收音細節（QR / 藍牙進度 / 即時逐字稿），無內容時不顯示 */}
+            <RouterDetails />
             <main className="flex-1 overflow-hidden">
               <Workspace />
             </main>

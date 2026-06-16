@@ -211,7 +211,9 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 | 路由協調 | `AudioIngestionRouter.ts` + `AsyncMutex.ts` | 四態狀態機 + **優先權**（WebRTC 串流時藍牙降背景低優先，不掉幀）+ 非同步鎖防並發雙寫 |
 | 前端狀態 | `store/audioStore.ts`(**Zustand**) + `RouterPanel.tsx` | `AudioSourceState` 四態、三源切換、藍牙進度條、VU、即時逐字稿 |
 
-> **目前面板接線（重要）**：掛在 App 的 `RouterPanel` 三來源為 **🖥️ 電腦系統 / 📱 手機收音 / 🔵 藍牙同步**。
+> **版面（重要）**：`RouterPanel.tsx` 拆成兩塊 — **`RouterBar`**（狀態燈＋三來源切換＋停止＋VU，**併進頂部 header**，省一條橫列）與 **`RouterDetails`**（手機 QR／藍牙進度／即時逐字稿，放在 header 下方、**無內容時不顯示**）。兩者共用 zustand 音訊 store。
+>
+> **目前面板接線（重要）**：三來源為 **🖥️ 電腦系統 / 📱 手機收音 / 🔵 藍牙同步**。
 > - **📱 手機收音** 走上方「雙源收音」那套**已測試的 WSS 手機橋接**（`PhoneBridgeServer`，自簽 HTTPS + QR + token），**不是 WebRTC**；點選後面板顯示 QR 供手機掃描（以 `CaptureSourceAdapter(phoneBridge,"webrtc")` 接進 router）。`WebRtcSoftwareSource` 與 `/webrtc/*` 信令**保留**為未來「真 WebRTC」備援接點。
 > - **即時逐字稿來源**：設了 `WHISPER_BIN`/`WHISPER_MODEL_PATH` → 本地 whisper（`StreamingTranscriber`）；否則有 `GEMINI_API_KEY` → **Gemini Live**（`GeminiStreamingTranscriber`）即時出粗稿。兩者皆無才不出字 → 所以**電腦系統／手機收音不裝 whisper 也能看到逐字稿**。
 > - **停止後整檔精修帶入會議**：對「電腦系統 / 手機收音」按停止後，工作區會出現「✨ 精修並帶入會議」（`POST /router/transcribe`）——把整段收音（router 累積的 AGC 後 PCM 編成 WAV）交 Gemini 整檔精修成乾淨繁體稿（含 `[mm:ss]` 與發言人）填入會議逐字稿，再 💾 存檔 / 分析。即時粗稿（可能簡體/語言漂移）只是預覽，**精修版才是可存檔的最終稿**。精修失敗（限流/斷網）會保留錄音供重試，不會白收。
@@ -248,3 +250,4 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 - **正式版 sidecar 打包**：`npm run build:sidecar` 產出 `server.cjs`；要隨 Tauri 打包，需將其（連同 node 或用 `pkg`/`bun --compile` 包成單一執行檔）設為 Tauri `externalBin` 並於 `lib.rs` 以 shell plugin spawn。目前 dev 由 `concurrently` 啟動。
 - 首次使用 `local` 嵌入會自動下載 all-MiniLM 模型到本地快取（之後離線）。
 - macOS 打包的 `icon.icns` 未附；在 mac 上以 `npm run tauri icon` 產生。
+- **Gemini 暫時過載自動重試**：`GeminiLlmService` 對 429／5xx（如「This model is currently experiencing high demand」）會退避重試最多 2 次（0.8s、1.6s），分析/聊天/匯出/轉錄不會一遇過載就失敗；仍失敗才回紅字錯誤。
