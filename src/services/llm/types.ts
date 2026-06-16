@@ -16,4 +16,13 @@ export interface LlmService {
 
   /** 翻譯逐字稿並保留 `[mm:ss] 發言人:` 格式。 */
   translateWithTimestamps(transcript: string, targetLanguage: string): Promise<string>;
+
+  /**
+   * （選配）一次回傳「主動式分析 ＋ 行動方針」，把原本兩個請求併成一個 → 省一半額度。
+   * 只有支援的 provider（目前 Gemini）會實作；沒實作時 server 會退回分別呼叫上面兩個方法。
+   */
+  analyzeAll?(
+    currentTranscript: string,
+    historicalContext: string,
+  ): Promise<{ analysis: ProactiveAnalysis; actionItems: ActionItem[] }>;
 }

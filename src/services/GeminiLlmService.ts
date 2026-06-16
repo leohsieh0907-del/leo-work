@@ -97,6 +97,29 @@ const COMPOSED_DOC_SCHEMA = {
   required: ["title", "blocks"],
 };
 
+// 合併分析：主動式分析 ＋ 行動方針 一次回（省一半請求）。
+const ANALYZE_ALL_SCHEMA = {
+  type: "object",
+  properties: {
+    theme: { type: "string" },
+    key_summary: { type: "array", items: { type: "string" } },
+    historical_conflicts: { type: "array", items: { type: "string" } },
+    action_items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          task: { type: "string" },
+          assignee: { type: "string" },
+          deadline: { type: "string" },
+        },
+        required: ["task", "assignee", "deadline"],
+      },
+    },
+  },
+  required: ["theme", "key_summary", "historical_conflicts", "action_items"],
+};
+
 function languageName(code: string): string {
   switch (code) {
     case "zh":
@@ -173,7 +196,7 @@ export class GeminiLlmService implements LlmService {
 
       if (!resp.ok) {
         const msg = data?.error?.message ?? `HTTP ${resp.status}`;
-        throw new AppError(ErrorCode.CLAUDE_API_ERROR, `Gemini API 錯誤：${msg}`);
+        throw new AppError(ErrorCode.CLAUDE_API_ERROR, geminiErrorMessage("Gemini API 錯誤：", resp.status, msg));
       }
 
       const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
@@ -208,6 +231,46 @@ export class GeminiLlmService implements LlmService {
       theme: String(obj.theme ?? "").trim() || "（未能產生主題）",
       key_summary: toStrArray(obj.key_summary),
       historical_conflicts: toStrArray(obj.historical_conflicts),
+    };
+  }
+
+  /** 一次回主動式分析 ＋ 行動方針（合併兩個請求，省一半免費額度）。 */
+  async analyzeAll(
+    currentTranscript: string,
+    historicalContext: string,
+  ): Promise<{ analysis: ProactiveAnalysis; actionItems: ActionItem[] }> {
+    const system =
+      `今天是 ${todayString()}。你是專業會議分析助理，只根據提供的『當前會議逐字稿』實際內容分析，所有結論都要有逐字稿依據，嚴禁虛構。\n` +
+      "theme：一句話總結會議在談什麼。\n" +
+      "key_summary：關鍵決定與討論重點，每點一句、要具體。\n" +
+      "historical_conflicts：當前內容與『歷史會議背景』明顯不一致之處；沒有歷史或無衝突就給空陣列。\n" +
+      "action_items：要有人去執行的待辦——task 具體要做什麼；assignee 負責人（沒明講寫『未指定』）；" +
+      "deadline 把『下週五/月底前』等相對時間依今天日期換算成 YYYY-MM-DD（沒提到寫『未指定』）；沒有任何待辦就給空陣列。\n" +
+      "全程使用繁體中文。";
+
+    const user =
+      "=== 當前會議逐字稿 ===\n" +
+      currentTranscript +
+      "\n\n=== 歷史會議背景 ===\n" +
+      (historicalContext.trim() || "（無歷史背景）");
+
+    const raw = await this.generate(system, user, ANALYZE_ALL_SCHEMA);
+    const obj = safeJsonObject(raw);
+    const arr = Array.isArray(obj.action_items) ? obj.action_items : [];
+    return {
+      analysis: {
+        theme: String(obj.theme ?? "").trim() || "（未能產生主題）",
+        key_summary: toStrArray(obj.key_summary),
+        historical_conflicts: toStrArray(obj.historical_conflicts),
+      },
+      actionItems: arr
+        .filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null)
+        .map((x) => ({
+          task: String(x.task ?? "").trim(),
+          assignee: String(x.assignee ?? "未指定").trim() || "未指定",
+          deadline: String(x.deadline ?? "未指定").trim() || "未指定",
+        }))
+        .filter((a) => a.task.length > 0),
     };
   }
 
@@ -295,7 +358,7 @@ export class GeminiLlmService implements LlmService {
     if (!resp.ok) {
       throw new AppError(
         ErrorCode.CLAUDE_API_ERROR,
-        `Gemini 轉錄錯誤：${data?.error?.message ?? `HTTP ${resp.status}`}`,
+        geminiErrorMessage("Gemini 轉錄錯誤：", resp.status, data?.error?.message ?? `HTTP ${resp.status}`),
       );
     }
     const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
@@ -351,7 +414,7 @@ export class GeminiLlmService implements LlmService {
     if (!resp.ok) {
       throw new AppError(
         ErrorCode.CLAUDE_API_ERROR,
-        `Gemini 對話錯誤：${data?.error?.message ?? `HTTP ${resp.status}`}`,
+        geminiErrorMessage("Gemini 對話錯誤：", resp.status, data?.error?.message ?? `HTTP ${resp.status}`),
       );
     }
     const answer = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
@@ -503,6 +566,19 @@ async function fetchGeminiWithRetry(url: string, body: unknown, retries = 2): Pr
     }
     return resp;
   }
+}
+
+/** 把 Gemini 錯誤轉成易讀訊息；429（額度/限流）給中文友善提示＋約略恢復時間。 */
+function geminiErrorMessage(prefix: string, status: number, raw: string): string {
+  if (status === 429) {
+    const m = /([\d.]+)\s*s/.exec(raw);
+    const secs = m ? Math.ceil(parseFloat(m[1])) : null;
+    if (secs && secs > 120) {
+      return `Gemini 免費額度已達上限，約 ${Math.ceil(secs / 60)} 分鐘後恢復；可稍候再試，或換金鑰／開啟付費。`;
+    }
+    return `Gemini 免費額度暫時用盡（每分鐘上限）${secs ? `，約 ${secs} 秒後恢復` : ""}，請稍候再試一次。`;
+  }
+  return `${prefix}${raw}`;
 }
 
 /** 解析 chart 的 series：[{name, values:number[]}]，濾掉空/壞資料。 */

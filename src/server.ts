@@ -304,10 +304,13 @@ app.post(
       ? await vectorStore.queryHistoricalContext(currentTranscript, historyLimit)
       : "";
 
-    const [analysis, actionItems] = await Promise.all([
-      llm.generateProactiveAnalysis(currentTranscript, historicalContext),
-      llm.extractActionItems(currentTranscript),
-    ]);
+    // 支援的 provider（Gemini）用 analyzeAll 一次回兩者，省一半請求；否則分別呼叫。
+    const { analysis, actionItems } = llm.analyzeAll
+      ? await llm.analyzeAll(currentTranscript, historicalContext)
+      : await Promise.all([
+          llm.generateProactiveAnalysis(currentTranscript, historicalContext),
+          llm.extractActionItems(currentTranscript),
+        ]).then(([analysis, actionItems]) => ({ analysis, actionItems }));
 
     const payload: AnalyzeResponse = { analysis, actionItems, historicalContext };
     res.json(payload);
