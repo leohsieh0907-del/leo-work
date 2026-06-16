@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leo work — 功能介紹與用法</title>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#141a22; --card:#161d27; --card2:#1c2531;
+    --line:#263040; --text:#e6edf3; --muted:#9aa7b5; --dim:#6b7888;
+    --accent:#f5a623; --accent2:#33c4a0; --blue:#4aa3ff; --danger:#ff6b6b;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:"Segoe UI","Microsoft JhengHei","PingFang TC",system-ui,sans-serif;
+    background:linear-gradient(180deg,#0b0f15,#0d1117 30%);
+    color:var(--text); line-height:1.75; padding:0 0 80px;
+  }
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px}
+
+  header.hero{
+    text-align:center;padding:64px 22px 44px;
+    background:radial-gradient(60% 120% at 50% 0%, rgba(245,166,35,.10), transparent 70%);
+    border-bottom:1px solid var(--line);
+  }
+  .hero .owl{font-size:54px;line-height:1}
+  .hero h1{font-size:38px;font-weight:800;margin:10px 0 6px;letter-spacing:.5px}
+  .hero .sub{color:var(--muted);font-size:18px}
+  .hero .tag{display:inline-block;margin-top:18px;padding:6px 14px;border:1px solid var(--line);
+    border-radius:999px;color:var(--accent2);font-size:13px;background:rgba(51,196,160,.06)}
+
+  .pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:34px 0}
+  .pillar{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .pillar .ic{font-size:26px}
+  .pillar h3{font-size:16px;margin:8px 0 4px}
+  .pillar p{color:var(--muted);font-size:13.5px}
+
+  nav.toc{position:sticky;top:0;z-index:5;background:rgba(13,17,23,.86);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);padding:12px 0;margin-bottom:8px}
+  nav.toc .wrap{display:flex;flex-wrap:wrap;gap:8px}
+  nav.toc a{color:var(--muted);text-decoration:none;font-size:13px;padding:5px 11px;border-radius:999px;
+    border:1px solid transparent}
+  nav.toc a:hover{color:var(--text);border-color:var(--line);background:var(--card)}
+
+  section{margin:46px 0}
+  h2{font-size:25px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+  h2 .bar{width:5px;height:24px;border-radius:3px;background:var(--accent)}
+  .lead{color:var(--muted);margin-bottom:20px;font-size:15px}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .feature{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;
+    transition:.15s border-color}
+  .feature:hover{border-color:#3a4760}
+  .feature .ico{font-size:22px;margin-bottom:8px}
+  .feature h3{font-size:17px;margin-bottom:7px}
+  .feature p{color:var(--muted);font-size:14px}
+  .feature ul{margin:8px 0 0 0;padding-left:18px;color:var(--muted);font-size:13.5px}
+  .feature li{margin:3px 0}
+  .feature code{background:#0b1118;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:12.5px;color:var(--accent2)}
+
+  .steps{counter-reset:step;display:flex;flex-direction:column;gap:14px}
+  .step{display:flex;gap:16px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px}
+  .step::before{counter-increment:step;content:counter(step);flex:none;width:34px;height:34px;border-radius:50%;
+    background:var(--accent);color:#1a1206;font-weight:800;display:grid;place-items:center;font-size:16px}
+  .step h4{font-size:16px;margin-bottom:3px}
+  .step p{color:var(--muted);font-size:14px}
+  .step code{background:#0b1118;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:12.5px;color:var(--accent2)}
+
+  .callout{border-radius:var(--radius);padding:18px 20px;border:1px solid;margin:18px 0;font-size:14.5px}
+  .callout.warn{background:rgba(245,166,35,.07);border-color:rgba(245,166,35,.4)}
+  .callout.info{background:rgba(74,163,255,.07);border-color:rgba(74,163,255,.35)}
+  .callout.danger{background:rgba(255,107,107,.07);border-color:rgba(255,107,107,.35)}
+  .callout b{color:var(--text)}
+  .callout .ttl{font-weight:800;display:block;margin-bottom:4px}
+
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-size:14px}
+  th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--card2);color:var(--text);font-weight:700}
+  tr:last-child td{border-bottom:none}
+  td .k{color:var(--accent);font-weight:700}
+
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .vs .box{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .vs .box h4{font-size:16px;margin-bottom:10px}
+  .vs .box .src{font-size:13px;color:var(--dim);margin-bottom:12px}
+  .vs .box ul{padding-left:18px;color:var(--muted);font-size:13.5px}
+  .vs .box li{margin:5px 0}
+  .vs .box .auto{color:var(--accent2);font-weight:700}
+  .vs .box .manual{color:var(--accent);font-weight:700}
+
+  pre{background:#0a0e14;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;
+    font-family:"Cascadia Code",Consolas,monospace;font-size:13px;color:#cfe3d8;margin:10px 0}
+  .muted{color:var(--muted)}
+  footer{text-align:center;color:var(--dim);font-size:13px;margin-top:54px;padding-top:24px;border-top:1px solid var(--line)}
+
+  @media(max-width:720px){
+    .grid,.vs,.pillars{grid-template-columns:1fr}
+    .hero h1{font-size:30px}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="owl">🦉</div>
+  <h1>Leo work</h1>
+  <div class="sub">桌面錄音 ・ AI 會議助理</div>
+  <div class="tag">全本地加密 ・ 主動式分析 ・ 跨會議記憶</div>
+</header>
+
+<div class="wrap">
+
+  <div class="pillars">
+    <div class="pillar"><div class="ic">🔒</div><h3>本地隱私安全</h3><p>錄音與逐字稿以 AES-256-GCM 加密落地，明文絕不外傳，sidecar 只綁本機。</p></div>
+    <div class="pillar"><div class="ic">🧠</div><h3>主動式智慧</h3><p>自動產出摘要、衝突提醒、行動方針，還會橫向比對你過去的會議。</p></div>
+    <div class="pillar"><div class="ic">🗂️</div><h3>跨場次記憶</h3><p>每場會議都進向量記憶庫，之後可以一句話跨會議問答、查找。</p></div>
+  </div>
+</div>
+
+<nav class="toc"><div class="wrap">
+  <a href="#start">快速開始</a>
+  <a href="#features">核心功能</a>
+  <a href="#flow">完整流程</a>
+  <a href="#capture">兩套收音</a>
+  <a href="#export">匯出</a>
+  <a href="#memory">記憶聊天</a>
+  <a href="#notes">注意事項</a>
+  <a href="#env">設定</a>
+</div></nav>
+
+<div class="wrap">
+
+  <!-- 快速開始 -->
+  <section id="start">
+    <h2><span class="bar"></span>快速開始</h2>
+    <p class="lead">日常啟動只要點桌面捷徑，等畫面出來就能用。</p>
+    <div class="steps">
+      <div class="step"><div><h4>啟動 App</h4><p>點桌面捷徑 <code>Leo work.lnk</code>（或執行 <code>start-leo-work.bat</code>）。它會自動清掉舊連線、起服務，幾秒後開瀏覽器。</p></div></div>
+      <div class="step"><div><h4>開啟畫面</h4><p>瀏覽器進入 <code>http://localhost:1420</code>。畫面會等背景服務就緒後才顯示，這是正常的。</p></div></div>
+      <div class="step"><div><h4>開始用</h4><p>頂部有兩個分頁：<b>工作區</b>（錄音 / 逐字稿 / 分析 / 匯出）與 <b>🦉 記憶聊天</b>（跨會議問答）。</p></div></div>
+    </div>
+    <div class="callout info"><span class="ttl">💡 需要網路與金鑰</span>語音轉錄、即時逐字稿、AI 助理對話走 Google Gemini（有免費額度），需要設定 <b>GEMINI_API_KEY</b> 並連網。加密、向量記憶等本地功能離線也能跑。</div>
+  </section>
+
+  <!-- 核心功能 -->
+  <section id="features">
+    <h2><span class="bar"></span>核心功能</h2>
+    <p class="lead">一場會議從「錄」到「整理成文件」需要的，都在裡面。</p>
+    <div class="grid">
+
+      <div class="feature">
+        <div class="ico">🎙️</div>
+        <h3>錄音 + 混合式即時逐字稿</h3>
+        <p>按下錄音邊講邊出字，停止後再整檔精修成乾淨版。</p>
+        <ul>
+          <li><b>錄音中</b>：即時跳出「🔴 即時粗稿」（速度優先，可能有小瑕疵）</li>
+          <li><b>按停止</b>：自動用乾淨、帶 <code>[mm:ss] 發言人:</code> 的精修版覆蓋</li>
+          <li>超過 15 分鐘會自動續錄、不中斷</li>
+        </ul>
+      </div>
+
+      <div class="feature">
+        <div class="ico">🌐</div>
+        <h3>轉錄語言可選</h3>
+        <p>逐字稿面板右上下拉，控制停止後精修版的語言。</p>
+        <ul>
+          <li><b>自動</b>（預設）：用原語言；非中文句後面附全形括號繁中翻譯</li>
+          <li><b>一律繁中</b>：全部轉繁體中文（最穩）</li>
+          <li><b>一律英文</b>：全部轉英文</li>
+        </ul>
+      </div>
+
+      <div class="feature">
+        <div class="ico">🦉</div>
+        <h3>AI 助理（聊天＋匯出一體）</h3>
+        <p>工作區底部的主互動面板，預設展開、可放大。</p>
+        <ul>
+          <li>對話式問「這份逐字稿」的問題，並結合跨會議記憶回答</li>
+          <li>記得多輪對話脈絡</li>
+          <li>面板上方就有匯出列：📋複製 / ⬇.md / 📄Word / 📊Excel / 📽PPT</li>
+        </ul>
+      </div>
+
+      <div class="feature">
+        <div class="ico">📊</div>
+        <h3>主動式分析</h3>
+        <p>按「分析」一鍵產出結構化結果。</p>
+        <ul>
+          <li>主題、摘要、<b>⚠️ 衝突提醒</b>、行動方針表（任務 / 負責人 / 截止日）</li>
+          <li>會橫向比對你<b>過去的會議</b>，找出前後矛盾</li>
+          <li>分析＋行動方針併成 1 次請求，省免費額度</li>
+        </ul>
+      </div>
+
+      <div class="feature">
+        <div class="ico">🗂️</div>
+        <h3>跨會議全局記憶</h3>
+        <p>每場會議自動切片進向量庫，之後可跨場檢索。</p>
+        <ul>
+          <li>本地 LanceDB 向量庫、離線嵌入模型</li>
+          <li>問答時自動把相關的舊會議內容找回來當依據</li>
+        </ul>
+      </div>
+
+      <div class="feature">
+        <div class="ico">🌍</div>
+        <h3>翻譯</h3>
+        <p>逐字稿一鍵翻譯成 英 / 日 / 韓 / 中，保留 <code>[mm:ss] 發言人:</code> 格式。</p>
+      </div>
+
+      <div class="feature">
+        <div class="ico">📤</div>
+        <h3>匯出會議記錄</h3>
+        <p>.md / Word / Excel / PPT，瀏覽器端離線產檔、不上傳。</p>
+        <ul>
+          <li><b>預設範本</b>：直接排版，零 API</li>
+          <li><b>AI 客製</b>：跟 AI 討論完要怎麼整理，再產出</li>
+          <li>PPT 會把數值表格<b>自動補成圖表</b></li>
+        </ul>
+      </div>
+
+      <div class="feature">
+        <div class="ico">📱</div>
+        <h3>雙源收音</h3>
+        <p>除了電腦麥克風，還能用電腦系統聲或手機當麥克風。</p>
+        <ul>
+          <li>🖥️ 電腦系統混音、📱 手機掃 QR 收音</li>
+          <li>VU 訊號條即時顯示音量</li>
+          <li>停止後可「✨ 精修並帶入會議」</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 完整流程 -->
+  <section id="flow">
+    <h2><span class="bar"></span>完整使用流程（一場會議從頭到尾）</h2>
+    <p class="lead">最常見的用法：用電腦麥克風錄一場會、整理成文件。</p>
+    <div class="steps">
+      <div class="step"><div><h4>進「工作區」分頁</h4><p>確認逐字稿面板在畫面中央。</p></div></div>
+      <div class="step"><div><h4>按 🎙 錄音</h4><p>開始計時並收音；錄音中會即時跳出「🔴 即時粗稿」讓你看到進度。</p></div></div>
+      <div class="step"><div><h4>（可選）先選好轉錄語言</h4><p>右上下拉選「自動 / 一律繁中 / 一律英文」。會議若以中文為主，選「一律繁中」最穩。</p></div></div>
+      <div class="step"><div><h4>按停止</h4><p>系統自動把整段送精修，用乾淨版（繁體、時間戳、發言人）覆蓋粗稿，並落地保存。</p></div></div>
+      <div class="step"><div><h4>按「分析」</h4><p>產出摘要、衝突提醒、行動方針表，並比對歷史會議。</p></div></div>
+      <div class="step"><div><h4>用 🦉 AI 助理追問 / 討論</h4><p>例如「幫我把結論濃縮成三點」「這場跟上次的決議有沒有衝突」。</p></div></div>
+      <div class="step"><div><h4>匯出</h4><p>在 AI 助理上方匯出列選格式（Word / Excel / PPT / .md），直接下載。</p></div></div>
+    </div>
+  </section>
+
+  <!-- 兩套收音 -->
+  <section id="capture">
+    <h2><span class="bar"></span>兩套收音系統的差別（重要）</h2>
+    <p class="lead">App 有<b>兩套獨立</b>的收音入口，搞混會雙錄又撞限流。請每次只挑一套。</p>
+    <div class="vs">
+      <div class="box">
+        <h4>🎙 下方逐字稿面板</h4>
+        <div class="src">來源：電腦本機<b>麥克風</b></div>
+        <ul>
+          <li>按 🎙 錄音 → 邊講邊出即時稿</li>
+          <li>按停止 → <span class="auto">自動</span>精修並填入會議逐字稿</li>
+          <li>最單純的一般會議用這個</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h4>🖥️📱 上方收音列（頂部 header）</h4>
+        <div class="src">來源：<b>電腦系統聲</b> 或 <b>手機</b></div>
+        <ul>
+          <li>選 🖥️ 電腦系統 / 📱 手機收音（掃 QR）</li>
+          <li>收音時上方顯示即時粗稿（預覽）</li>
+          <li>按停止後要<span class="manual">手動</span>點「✨ 精修並帶入會議」才會填入</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout warn"><span class="ttl">⚠️ 操作重點</span>
+      上方收音列的即時稿<b>只是預覽</b>，永遠不會自動流入會議稿——一定要「停止 → 點 ✨ 精修並帶入會議」。
+      若停在「手機收音中」沒按停止，就不會有東西進去。<b>別同時開兩套</b>。
+    </div>
+    <div class="callout info"><span class="ttl">📱 手機收音怎麼連</span>
+      點「📱 手機收音」後畫面出現 QR；手機掃描開啟網頁（自簽憑證，<b>首次要點「信任 / 繼續」</b>），允許麥克風後就開始把聲音傳回電腦。需同一區網。
+    </div>
+  </section>
+
+  <!-- 匯出 -->
+  <section id="export">
+    <h2><span class="bar"></span>匯出會議記錄</h2>
+    <p class="lead">在 🦉 AI 助理面板上方的匯出列操作（需先按「分析」有結果）。</p>
+    <table>
+      <tr><th>方式</th><th>怎麼觸發</th><th>產出</th></tr>
+      <tr>
+        <td><span class="k">預設範本</span><br><span class="muted">零 API、最快</span></td>
+        <td>沒跟 AI 討論，直接點格式鈕</td>
+        <td>本機把分析結果排版：Word＝完整記錄含逐字稿；Excel＝概要＋各表分頁；PPT＝封面＋每節一張</td>
+      </tr>
+      <tr>
+        <td><span class="k">AI 客製</span><br><span class="muted">討論完再產出</span></td>
+        <td>先在助理裡多輪討論要怎麼整理，再點格式鈕</td>
+        <td>AI 依「討論脈絡＋格式＋會議資料」重組。例：「PPT 只放結論和數字」「Word 用公文語氣加風險建議」「Excel 行動方針多一欄優先級」</td>
+      </tr>
+    </table>
+    <div class="callout info"><span class="ttl">📈 想要圖表 → 用 PPT</span>
+      只要 AI 把數字整理成表格（第一欄項目＋其餘欄純數字），PPT 會自動補一張圖表投影片（單欄→圓餅、多欄→長條）。Word／Excel 則以資料表呈現。
+    </div>
+    <div class="callout warn"><span class="ttl">🛟 韌性</span>
+      AI 重組偶爾會因為過載或安全過濾失敗，這時會<b>自動退回預設範本</b>匯出，至少一定產得出檔，不會卡住（可再試一次）。
+    </div>
+  </section>
+
+  <!-- 記憶聊天 -->
+  <section id="memory">
+    <h2><span class="bar"></span>整頁「記憶聊天」</h2>
+    <p class="lead">頂部分頁切到「🦉 記憶聊天」——<b>不綁當前會議</b>，純粹跨所有會議的記憶問答。</p>
+    <div class="grid">
+      <div class="feature">
+        <div class="ico">✨</div>
+        <h3>空白時</h3>
+        <p>顯示歡迎畫面：大輸入框 ＋ 一排建議卡，點一下就能起頭問。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">💬</div>
+        <h3>有對話時</h3>
+        <p>變成訊息串 ＋ 底部輸入列，可隨時「＋ 新對話」回到首頁。</p>
+      </div>
+    </div>
+    <div class="callout info">
+      和工作區底部的 AI 助理走同一套問答，差別是這裡<b>不帶當前逐字稿</b>，只靠跨會議向量記憶。
+      適合問「我之前哪幾場提過 X」「上季的決議是什麼」這類橫跨多場會議的問題。
+      <span class="muted">（部分建議卡是範例提示詞，若記憶庫沒相關內容，AI 會誠實回查無。）</span>
+    </div>
+  </section>
+
+  <!-- 注意事項 -->
+  <section id="notes">
+    <h2><span class="bar"></span>注意事項 / 已知行為</h2>
+    <table>
+      <tr><th>現象</th><th>說明</th></tr>
+      <tr><td>即時粗稿出現簡體 / 別國語言 / 字間有空格</td><td>這是 STT 原始輸出的<b>已知行為</b>，即時稿只是預覽。<b>以停止後的精修版為準</b>（精修版繁體、有標點與發言人）。</td></tr>
+      <tr><td>AI 提示「請稍候 N 秒再試」</td><td>Gemini 免費額度每分鐘有上限，等幾秒～1 分鐘即可恢復；系統會自動短等待重試。連點會一直撞同一個窗口。</td></tr>
+      <tr><td>提示「每日額度用完」</td><td>當天免費額度用光，隔日恢復；或在 <code>.env</code> 換成另一個 Google 帳號的金鑰（免費額度是按帳號算）。</td></tr>
+      <tr><td>手機掃 QR 連不上</td><td>需與電腦同一區網；首次要在手機點「信任憑證 / 繼續前往」（自簽 HTTPS 屬正常）。</td></tr>
+      <tr><td>電腦系統聲錄不到</td><td>Windows 需開「立體聲混音」或裝虛擬音源；偵測不到時會自動退化為只錄麥克風。</td></tr>
+      <tr><td>🔵 藍牙同步</td><td>介面有保留，但目前未啟用（需特定錄音卡硬體），暫不可用。</td></tr>
+    </table>
+  </section>
+
+  <!-- 設定 -->
+  <section id="env">
+    <h2><span class="bar"></span>設定（給需要動到的人）</h2>
+    <p class="lead">設定都在專案根目錄的 <code>.env</code>，改完<b>要重啟服務</b>（重新點捷徑）才生效。</p>
+    <table>
+      <tr><th>變數</th><th>用途</th></tr>
+      <tr><td><span class="k">GEMINI_API_KEY</span></td><td>轉錄 / 即時逐字稿 / AI 助理對話<b>必填</b>（Google AI Studio 申請，有免費額度）</td></tr>
+      <tr><td><span class="k">GEMINI_MODEL</span></td><td>對話 / 分析 / 整檔轉錄共用的模型（目前 <code>gemini-3.5-flash</code>）</td></tr>
+      <tr><td><span class="k">GEMINI_LIVE_MODEL</span></td><td>即時逐字稿用的 Live 模型（<code>gemini-3.1-flash-live-preview</code>）</td></tr>
+      <tr><td><span class="k">LLM_PROVIDER</span></td><td>分析/翻譯用哪家：<code>gemini</code>（現用）/ <code>ollama</code>（本地免費離線）/ <code>claude</code>（付費）</td></tr>
+      <tr><td><span class="k">ENCRYPTION_SALT</span></td><td>加密金鑰推導用。<b>別亂改</b>——改了舊的加密會議檔會無法解密</td></tr>
+    </table>
+    <div class="callout danger"><span class="ttl">🔐 安全</span>
+      <code>.env</code>、加密會議檔、資料庫都已排除在版控外，金鑰不會進 git。所有錄音 / 逐字稿以 AES-256-GCM 加密儲存，被竄改會直接拒絕解密，不會回傳亂碼。
+    </div>
+  </section>
+
+  <footer>
+    Leo work — 桌面錄音 / AI 會議助理 ・ 功能說明 ・ 2026-06-16<br>
+    架構：Tauri 外殼 ＋ React 前端 ＋ Node sidecar（重服務只綁本機 127.0.0.1）
+  </footer>
+
+</div>
+</body>
+</html>
