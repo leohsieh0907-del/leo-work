@@ -47,6 +47,7 @@
   section{margin:46px 0}
   h2{font-size:25px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:10px}
   h2 .bar{width:5px;height:24px;border-radius:3px;background:var(--accent)}
+  h3{font-size:18px;font-weight:700;margin:20px 0 8px;color:#d9e2ec}
   .lead{color:var(--muted);margin-bottom:20px;font-size:15px}
 
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -124,6 +125,7 @@
   <a href="#features">核心功能</a>
   <a href="#flow">完整流程</a>
   <a href="#capture">兩套收音</a>
+  <a href="#online">線上會議</a>
   <a href="#export">匯出</a>
   <a href="#memory">記憶聊天</a>
   <a href="#notes">注意事項</a>
@@ -280,6 +282,47 @@
     </div>
     <div class="callout info"><span class="ttl">📱 手機收音怎麼連</span>
       點「📱 手機收音」後畫面出現 QR；手機掃描開啟網頁（自簽憑證，<b>首次要點「信任 / 繼續」</b>），允許麥克風後就開始把聲音傳回電腦。需同一區網。
+    </div>
+  </section>
+
+  <!-- 線上會議 -->
+  <section id="online">
+    <h2><span class="bar"></span>線上會議怎麼錄（VooV / Zoom / Teams）</h2>
+    <p class="lead">Leo work 不接會議軟體的 API、也不以機器人身分入會——它在作業系統層收音，所以 VooV、Zoom、Teams 對它來說完全一樣，方法通用。</p>
+
+    <div class="callout info"><span class="ttl">✅ 正確做法：上方收音列選「🖥️ 電腦系統」</span>
+      這個來源會用 FFmpeg 同時抓 <b>你的麥克風</b>（你這端）＋ <b>系統 loopback</b>（喇叭輸出＝會議對方的聲音），混成一軌——正是為線上會議設計的。下方 🎙 錄音只收麥克風、收不到對方，不適合線上會議。
+    </div>
+
+    <h3>前提（關鍵）：要先有 loopback 裝置</h3>
+    <p>程式只認得名稱含這些字的裝置：<b>立體聲混音 / Stereo Mix / CABLE Output / virtual-audio / VoiceMeeter / What U Hear</b>。沒有的話會降級成「僅錄麥克風」，對方的聲音就收不到。</p>
+    <ul style="margin:6px 0 0 0;padding-left:20px;color:var(--muted);font-size:14px;line-height:1.8">
+      <li><b>最簡單</b>：開 Windows 內建「立體聲混音」——右下角喇叭圖示右鍵 → 音效設定 → 更多音效設定 → <b>錄製</b>分頁 → 空白處右鍵「顯示已停用的裝置」→ 對<b>立體聲混音</b>右鍵啟用。</li>
+      <li><b>沒有立體聲混音</b>（部分筆電 / USB 耳麥沒有）：裝虛擬音源 <b>VB-Audio Virtual Cable</b> 或 <b>VoiceMeeter</b>。</li>
+    </ul>
+
+    <h3>操作步驟</h3>
+    <div class="steps">
+      <div class="step"><div><p>先正常進 VooV / Zoom / Teams 開會。</p></div></div>
+      <div class="step"><div><p>Leo work 頂部收音列點 <code>🖥️ 電腦系統</code>。</p></div></div>
+      <div class="step"><div><p>看 <b>VU 訊號條</b>：你講話、對方講話<b>兩邊都要有跳動</b>（只有一邊跳＝loopback 沒設好）。</p></div></div>
+      <div class="step"><div><p>散會按<b>停止</b> → 點「<b>✨ 精修並帶入會議</b>」→ 語言選<b>一律繁中</b> → 填入會議逐字稿。</p></div></div>
+      <div class="step"><div><p>按「分析」→ 用 🦉 AI 助理整理 → 匯出 Word / PPT。</p></div></div>
+    </div>
+
+    <h3>耳機 vs 外放</h3>
+    <table>
+      <tr><th>情況</th><th>結果</th></tr>
+      <tr><td>有 loopback（立體聲混音 / 虛擬線）</td><td>✅ <b>戴耳機也收得到對方</b>（它抓的是播放串流，不是環境音）——首選</td></tr>
+      <tr><td>沒 loopback ＋ 外放</td><td>⚠️ 麥克風會收到喇叭傳出的對方聲音，但品質差、有回音 / 雜音</td></tr>
+      <tr><td>沒 loopback ＋ 戴耳機</td><td>❌ 對方聲音進耳機、麥克風收不到 → 只錄到你自己</td></tr>
+    </table>
+
+    <div class="callout warn"><span class="ttl">⏱️ 單次精修上限約 60 分鐘</span>
+      「✨ 精修並帶入會議」的緩衝上限為 60 分鐘（超過會提醒只精修前段）。大檔會自動改用 Gemini Files API 上傳，所以一小時內的會議都能完整精修；但按下精修後「上傳＋轉錄」需要等一段時間（接近一小時的會議可能要等 1～2 分鐘，屬正常）。超過 1 小時的會議建議中途分段：停止 → ✨精修帶入 → 再重新收音。
+    </div>
+    <div class="callout danger"><span class="ttl">🔔 開錄前先告知與會者</span>
+      錄製會議涉及他人聲音，依場合與規範，開始前請先讓與會者知道並取得同意。
     </div>
   </section>
 
