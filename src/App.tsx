@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import type { Update } from "@tauri-apps/plugin-updater";
 import { health } from "./lib/api";
+import { checkForUpdate, installUpdateAndRelaunch } from "./lib/updater";
 import Workspace from "./components/Workspace";
 import { RouterBar, RouterDetails } from "./components/RouterPanel";
 import MemoryChat from "./components/MemoryChat";
@@ -10,6 +12,8 @@ import MemoryChat from "./components/MemoryChat";
 export default function App() {
   const [ready, setReady] = useState<boolean | null>(null);
   const [view, setView] = useState<"workspace" | "memory">("workspace");
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   // 啟動時輪詢 sidecar 是否就緒（Node 服務啟動需一點時間）
   useEffect(() => {
@@ -26,8 +30,44 @@ export default function App() {
     };
   }, []);
 
+  // 啟動後檢查是否有新版（僅 Tauri 殼內有效，瀏覽器 dev 為 no-op）
+  useEffect(() => {
+    checkForUpdate().then(setUpdate);
+  }, []);
+
+  async function applyUpdate() {
+    if (!update) return;
+    setUpdating(true);
+    try {
+      await installUpdateAndRelaunch(update);
+    } catch (e) {
+      console.warn("更新失敗", e);
+      setUpdating(false);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
+      {update && (
+        <div className="flex items-center gap-3 border-b border-amber-400/30 bg-amber-500/10 px-5 py-2 text-sm">
+          <span>✨ 有新版 <b>v{update.version}</b> 可更新</span>
+          <button
+            onClick={applyUpdate}
+            disabled={updating}
+            className="ml-auto rounded-md bg-brand px-3 py-1 text-white transition hover:opacity-90 disabled:opacity-50"
+          >
+            {updating ? "更新中…" : "立即更新並重啟"}
+          </button>
+          {!updating && (
+            <button
+              onClick={() => setUpdate(null)}
+              className="text-slate-400 hover:text-white"
+            >
+              稍後
+            </button>
+          )}
+        </div>
+      )}
       <header className="flex items-center gap-3 border-b border-white/10 bg-brand-panel px-5 py-2.5">
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-brand-accent text-lg">◆</span>

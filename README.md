@@ -249,9 +249,9 @@ AGC → VU → 同步 → Whisper 管線。檔案位於 `src/services/audio/`。
 
 - **Whisper 轉寫**：已透過雙源收音的 `StreamingTranscriber.ts` 接上（spawn whisper.cpp 執行檔，路徑走 `WHISPER_BIN`/`WHISPER_MODEL_PATH`；未設定則略過不報錯）。產出的逐字稿經 `/events` 即時推給前端，亦可接進 `/ingest` 建立跨會議記憶。需自備 whisper.cpp 執行檔與 ggml 模型。
   - **未裝 whisper 時的替代**：若有 `GEMINI_API_KEY`，router 自動改用 `GeminiStreamingTranscriber`（Gemini Live）即時出粗稿 → 電腦系統／手機收音不裝 whisper 也能看到逐字稿（雲端、需網路；屬即時粗稿，非整檔精修）。
-- **正式版 sidecar 打包**：`npm run build:sidecar` 產出 `server.cjs`；要隨 Tauri 打包，需將其（連同 node 或用 `pkg`/`bun --compile` 包成單一執行檔）設為 Tauri `externalBin` 並於 `lib.rs` 以 shell plugin spawn。目前 dev 由 `concurrently` 啟動。
+- **正式版 sidecar 打包 / 跨平台 / 自動更新**：已建管線——`npm run assemble:sidecar`（`scripts/assemble-sidecar.mjs`）把 `server.cjs` + 原生外部模組 + 當前平台 Node runtime 組成 Tauri `externalBin`(`binaries/leo-node`) + `resources`(`sidecar/`)，`lib.rs` 正式版 setup 階段 spawn；CI（`.github/workflows/release.yml`，`tauri-action` 三 OS）build + 簽章發 Release，前端 `src/lib/updater.ts` 接自動更新。**完整流程與待辦見 [`docs/CROSS-PLATFORM.md`](docs/CROSS-PLATFORM.md)**。⚠️ 尚待收尾：正式版執行期密鑰（`ENCRYPTION_SALT`/`GEMINI_API_KEY` 不能靠 `.env`）、結束時 kill sidecar。dev 仍由 `concurrently` 啟動。
 - 首次使用 `local` 嵌入會自動下載 all-MiniLM 模型到本地快取（之後離線）。
-- macOS 打包的 `icon.icns` 未附；在 mac 上以 `npm run tauri icon` 產生。
+- macOS 打包的 `icon.icns` 未附（CI 已在 build 前自動 `npx tauri icon` 產生整套；本機 build 也可手動跑一次）。
 - **省免費額度**：`/analyze` 用 `GeminiLlmService.analyzeAll` 把「分析＋行動方針」**併成 1 個請求**（原本 2 個，砍半最常用操作的用量）；provider 不支援（Ollama/Claude）才退回分別呼叫。429 等錯誤會轉成**中文友善提示**（含約略恢復時間）。免費額度是 per-帳號/專案，要更多額度請用另一個 Google 帳號的 key。
 - **Gemini 暫時失敗自動重試**：`GeminiLlmService.fetchGeminiWithRetry`——**5xx 伺服器過載**（如「This model is currently experiencing high demand」）退避重試 2 次（0.8s、1.6s）；**429 限流**讀回應的 `retryDelay`/「retry in Ns」：**短等待（每分鐘 RPM，≤15s）就等一下自動再試一次**（RPM 抖動自己撐過），**長等待（每日上限）直接回報**請使用者稍候或換 `.env` `GEMINI_MODEL`。不空轉硬打燒額度。
 - **Gemini RECITATION 空回應**：`gemini-3.5-flash`（thinking 模型）結構化輸出偶發觸發「疑似抄襲」安全過濾（HTTP 200 但 content 空、`finishReason:RECITATION`，多為誤判），約 1/3 機率。`generate()` 遇空回應**自動換一次再試最多 3 次**壓低機率；匯出端再加一層退回預設範本，確保不卡死。圖表因此不直接依賴 Gemini 主動畫，改走「數值表格自動轉圖」更穩。

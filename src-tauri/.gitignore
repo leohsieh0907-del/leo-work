@@ -1,2 +1,6 @@
 /target
 /gen/schemas
+
+# 由 npm run assemble:sidecar 產生的正式版 sidecar 產物（每個 OS 各自重建，不進版控）
+/sidecar
+/binaries

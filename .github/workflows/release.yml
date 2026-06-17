@@ -1,0 +1,59 @@
+name: Release
+
+# 推一個 v* tag（例：git tag v0.1.0 && git push origin v0.1.0）或手動觸發，
+# 在 Windows / Linux / macOS 三個 runner 各自打包安裝檔 + 簽章的自動更新產物，
+# 發佈到 GitHub Releases（草稿）。發佈草稿後，已安裝的 App 下次啟動就會收到更新。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Linux 系統相依（webkit2gtk 等）
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: 安裝 npm 相依
+        run: npm ci
+
+      - name: 產生跨平台圖示（含 macOS .icns）
+        run: npx tauri icon src-tauri/icons/128x128@2x.png
+
+      - name: 打包 + 發佈
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 自動更新簽章（在 repo Settings → Secrets 設定）
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Leo work ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
