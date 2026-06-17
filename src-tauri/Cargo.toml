@@ -1,6 +1,6 @@
 [package]
 name = "leo-work"
-version = "0.1.1"
+version = "0.1.2"
 description = "Leo work 桌面外殼"
 authors = ["Hsinchun Capital"]
 edition = "2021"

@@ -38,9 +38,26 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::Manager;
     use tauri_plugin_shell::ShellExt;
 
-    let server = app
+    // server.cjs 的落點因平台/打包方式而異（Windows 實測在 exe 旁的 sidecar/，
+    // mac/linux 在 Resource 目錄）→ 依序找第一個存在的，找不到就明確報錯。
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(p) = app
         .path()
-        .resolve("sidecar/server.cjs", tauri::path::BaseDirectory::Resource)?;
+        .resolve("sidecar/server.cjs", tauri::path::BaseDirectory::Resource)
+    {
+        candidates.push(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("sidecar").join("server.cjs"));
+            candidates.push(dir.join("resources").join("sidecar").join("server.cjs"));
+        }
+    }
+    let server = candidates
+        .into_iter()
+        .find(|p| p.exists())
+        .ok_or("找不到 sidecar/server.cjs（打包資源缺失）")?;
+
     // 加密金鑰/設定/向量庫都放這（每位使用者固定、更新後保留）
     let data_dir = app.path().app_data_dir()?;
 
