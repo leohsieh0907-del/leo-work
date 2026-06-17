@@ -14,12 +14,12 @@
 | 0 | 自動更新簽章金鑰 | ✅ 已產生（`~/.tauri/leo-work-updater.key`，公鑰已寫進 `tauri.conf.json`） |
 | 1 | CI（三 OS build）+ updater 設定 | ✅ 已寫好（`.github/workflows/release.yml`） |
 | 2 | sidecar 打包 + 開機 spawn | 🟡 打包腳本已驗證可產出（Windows 實測）；Tauri build/spawn 待 CI 驗證 |
-| 3 | **正式版執行期密鑰**（`ENCRYPTION_SALT` / `GEMINI_API_KEY` 不能靠 `.env`） | 🔴 **未做——做完前安裝後仍無法啟動 sidecar** |
+| 3 | 正式版執行期設定（salt 自動產生 + 設定畫面輸入 `GEMINI_API_KEY`） | ✅ 完成（3a `5facba7`、3b `a35ce4d`） |
 | 4 | 前端「有新版→更新」提示 | ✅ 已接（`src/lib/updater.ts` + `App.tsx` 橫幅） |
 | 5 | 跨平台圖示（macOS `.icns`） | ✅ CI 內 `npx tauri icon` 自動產 |
 | 6 | macOS/Linux 系統收音（`dshow` 是 Windows 限定） | ⏳ 後續；先降級只錄麥克風 |
 
-**白話**：建置/發佈管線已就緒，但**里程碑 3 沒做完前，裝起來會卡在「連線本機服務中」**（sidecar 缺 `ENCRYPTION_SALT` 無法啟動）。里程碑 3 動到加密路徑，會另外處理 + 過 `/code-review`。
+**白話**：建置/發佈管線 + 執行期設定都已就緒——正式版會**自動產生加密 salt**（首次啟動、永不重生）、用 **⚙️ 設定畫面**輸入 Gemini 金鑰（存 `config.json`，重啟生效）。剩下就靠 CI 實際 build 一次，驗證 sidecar 打包/spawn 真的能起來。
 
 ---
 
@@ -71,7 +71,7 @@ npm run tauri:build     # 需 Rust + MSVC（macOS 需 Xcode CLT）
 
 ## 已知問題 / 後續優化
 - **sidecar 約 437 MB**（`onnxruntime-node` + `sharp` 為本地嵌入用）→ 若主要用 Gemini，可改 `EMBEDDING_PROVIDER` 不裝本地 ONNX 大幅瘦身。
-- **里程碑 3（執行期密鑰）**：正式版需把 `ENCRYPTION_SALT` 改成首次啟動產生並存進 app 資料夾、`GEMINI_API_KEY` 改用設定畫面輸入（不能塞進安裝檔）。
+- ~~里程碑 3（執行期密鑰）~~ ✅ 已完成：salt 首次啟動產生存 app 資料夾、Gemini 金鑰用 ⚙️ 設定畫面輸入（存 `config.json`，重啟生效）。
 - **sidecar 結束清理**：`lib.rs` spawn 後尚未在 App 關閉時 kill sidecar（避免 127.0.0.1:8765 殘留）。
 - **macOS Intel**：目前 `macos-latest` 是 arm64；要 Intel 版再加 `macos-13` 到 CI matrix。
 - **CI `npm ci` 需 `package-lock.json`**：確認它有被 commit。
