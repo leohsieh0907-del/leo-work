@@ -5,6 +5,7 @@
 // ════════════════════════════════════════════════════════════════════
 
 import "dotenv/config";
+import { loadRuntimeConfig } from "./services/AppConfig";
 import path from "node:path";
 import http from "node:http";
 import express, { type NextFunction, type Request, type Response } from "express";
@@ -55,13 +56,16 @@ import {
   type ComposeExportResponse,
 } from "./shared/types";
 
+// 正式版：先從 app 資料夾的 config.json 補齊 .env 缺的設定（含首次產生 ENCRYPTION_SALT）
+const { dataDir: DATA_DIR } = loadRuntimeConfig();
+
 // ─────────────── 環境設定 ───────────────
 
 const PORT = Number(process.env.SIDECAR_PORT ?? 8765);
 const PHONE_PORT = Number(process.env.PHONE_BRIDGE_PORT ?? 8443);
 const SALT = required("ENCRYPTION_SALT");
-const DB_PATH = process.env.LOCAL_DB_PATH ?? "./data/lancedb";
-const VAULT_DIR = path.resolve("data/vault");
+const DB_PATH = process.env.LOCAL_DB_PATH ?? path.join(DATA_DIR, "lancedb");
+const VAULT_DIR = path.join(DATA_DIR, "vault");
 const EMBED_PROVIDER = (process.env.EMBEDDING_PROVIDER ?? "local") as EmbeddingProvider;
 // LLM 來源：預設本地 Ollama（完全免費、離線）；設成 "claude" 才走付費 API。
 const LLM_PROVIDER = process.env.LLM_PROVIDER ?? "ollama";
@@ -77,7 +81,7 @@ function required(name: string): string {
 // ─────────────── 服務實例化 ───────────────
 
 const security = new SecurityManager(SALT);
-const meetingStore = new MeetingStore(security, SALT, path.resolve("data"));
+const meetingStore = new MeetingStore(security, SALT, DATA_DIR);
 const audioRepair = new AudioRepair();
 const splitter = new TextSplitter({ chunkSize: 300, overlap: 50 });
 const embedding = new EmbeddingService({

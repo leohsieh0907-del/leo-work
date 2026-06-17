@@ -41,12 +41,15 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let server = app
         .path()
         .resolve("sidecar/server.cjs", tauri::path::BaseDirectory::Resource)?;
+    // 加密金鑰/設定/向量庫都放這（每位使用者固定、更新後保留）
+    let data_dir = app.path().app_data_dir()?;
 
     let _child = app
         .shell()
         .sidecar("leo-node")?
         .arg(server.to_string_lossy().to_string())
         .env("SIDECAR_PORT", "8765")
+        .env("LEO_DATA_DIR", data_dir.to_string_lossy().to_string())
         .spawn()?;
 
     Ok(())
