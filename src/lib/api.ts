@@ -15,6 +15,8 @@ import type {
   ChatTurn,
   ComposeExportRequest,
   ComposeExportResponse,
+  ConfigStatus,
+  ConfigUpdate,
 } from "../shared/types";
 
 // sidecar 監聽位址（對應 .env 的 SIDECAR_PORT；前端固定走本機回環）
@@ -133,4 +135,16 @@ export function vaultLoad(req: {
   secretKey: string;
 }): Promise<{ data: string }> {
   return post("/vault/load", req);
+}
+
+/** 讀取設定狀態（不含金鑰值）。 */
+export async function getConfig(): Promise<ConfigStatus> {
+  const r = await fetch(`${BASE}/config`);
+  if (!r.ok) throw new Error(`讀取設定失敗（${r.status}）`);
+  return (await r.json()) as ConfigStatus;
+}
+
+/** 寫入設定（Gemini 金鑰 / LLM 來源）；回傳是否需重啟生效。 */
+export function saveConfig(update: ConfigUpdate): Promise<{ ok: true; restartRequired: boolean }> {
+  return post("/config", update);
 }

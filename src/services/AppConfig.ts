@@ -101,9 +101,10 @@ export function updateRuntimeConfig(patch: RuntimeConfigFile): void {
 }
 
 /** 給設定畫面用：回報非機密的設定狀態（不外洩金鑰值）。 */
-export function getRuntimeConfigStatus(): { hasGeminiKey: boolean; llmProvider: string } {
+export function getRuntimeConfigStatus(): { hasGeminiKey: boolean; llmProvider: string; geminiModel?: string } {
   return {
     hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     llmProvider: process.env.LLM_PROVIDER ?? "ollama",
+    geminiModel: process.env.GEMINI_MODEL,
   };
 }

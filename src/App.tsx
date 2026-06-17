@@ -5,6 +5,7 @@ import { checkForUpdate, installUpdateAndRelaunch } from "./lib/updater";
 import Workspace from "./components/Workspace";
 import { RouterBar, RouterDetails } from "./components/RouterPanel";
 import MemoryChat from "./components/MemoryChat";
+import SettingsModal from "./components/SettingsModal";
 
 // ── App 外殼：頂部狀態列 + 主工作區 ──
 // Workspace 由前端元件模組實作（逐字稿輸入、主動式分析、跨會議記憶檢索）。
@@ -14,6 +15,7 @@ export default function App() {
   const [view, setView] = useState<"workspace" | "memory">("workspace");
   const [update, setUpdate] = useState<Update | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // 啟動時輪詢 sidecar 是否就緒（Node 服務啟動需一點時間）
   useEffect(() => {
@@ -105,7 +107,16 @@ export default function App() {
           </div>
         )}
 
-        <div className="ml-auto shrink-0">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {ready && (
+            <button
+              onClick={() => setShowSettings(true)}
+              title="設定"
+              className="rounded-md px-2 py-1 text-slate-300 transition hover:bg-white/10 hover:text-white"
+            >
+              ⚙️
+            </button>
+          )}
           <StatusPill ready={ready} />
         </div>
       </header>
@@ -129,6 +140,8 @@ export default function App() {
           {ready === null ? "連線本機服務中…" : "本機服務未就緒，重試中…"}
         </main>
       )}
+
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

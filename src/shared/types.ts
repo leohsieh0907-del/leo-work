@@ -230,6 +230,20 @@ export interface ApiErrorBody {
   error: { code: ErrorCode; message: string; details?: unknown };
 }
 
+/** 設定狀態（GET /config；只回布林/非機密，不外洩金鑰值）。 */
+export interface ConfigStatus {
+  hasGeminiKey: boolean;
+  llmProvider: string;
+  geminiModel?: string;
+}
+
+/** 設定更新（POST /config）。空字串＝清除該設定。 */
+export interface ConfigUpdate {
+  geminiApiKey?: string;
+  llmProvider?: string;
+  geminiModel?: string;
+}
+
 // ════════════════ 雙源收音：跨邊界 DTO（前端 + sidecar 共用）════════════════
 
 /** 收音來源。 */

@@ -36,3 +36,13 @@ export async function installUpdateAndRelaunch(
   const { relaunch } = await import("@tauri-apps/plugin-process");
   await relaunch();
 }
+
+/** 重啟 App（Tauri 殼內真重啟；瀏覽器 dev 退回 reload）。 */
+export async function relaunchApp(): Promise<void> {
+  if (!inTauri()) {
+    window.location.reload();
+    return;
+  }
+  const { relaunch } = await import("@tauri-apps/plugin-process");
+  await relaunch();
+}

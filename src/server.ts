@@ -5,7 +5,7 @@
 // ════════════════════════════════════════════════════════════════════
 
 import "dotenv/config";
-import { loadRuntimeConfig } from "./services/AppConfig";
+import { loadRuntimeConfig, updateRuntimeConfig, getRuntimeConfigStatus } from "./services/AppConfig";
 import path from "node:path";
 import http from "node:http";
 import express, { type NextFunction, type Request, type Response } from "express";
@@ -54,6 +54,7 @@ import {
   type ChatTurn,
   type ComposeExportRequest,
   type ComposeExportResponse,
+  type ConfigUpdate,
 } from "./shared/types";
 
 // 正式版：先從 app 資料夾的 config.json 補齊 .env 缺的設定（含首次產生 ENCRYPTION_SALT）
@@ -234,6 +235,24 @@ const wrap =
 app.get("/health", (_req, res) => {
   res.json({ ok: true, provider: EMBED_PROVIDER });
 });
+
+// 正式版設定（取代 .env）：讀狀態（不外洩金鑰）/ 寫金鑰與 LLM 來源（重啟生效）
+app.get("/config", (_req, res) => {
+  res.json(getRuntimeConfigStatus());
+});
+
+app.post(
+  "/config",
+  wrap(async (req, res) => {
+    const { geminiApiKey, llmProvider, geminiModel } = req.body as ConfigUpdate;
+    const patch: Record<string, string | undefined> = {};
+    if (geminiApiKey !== undefined) patch.GEMINI_API_KEY = geminiApiKey.trim();
+    if (llmProvider !== undefined) patch.LLM_PROVIDER = llmProvider;
+    if (geminiModel !== undefined) patch.GEMINI_MODEL = geminiModel.trim();
+    updateRuntimeConfig(patch);
+    res.json({ ok: true, restartRequired: true });
+  }),
+);
 
 // 階段一：加密保存 / 解密讀取
 app.post(
