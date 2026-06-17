@@ -6,6 +6,26 @@
 
 ---
 
+## 2026-06-16（續）— 長會議整檔精修 + 系統收音修復 + 線上會議收音落地(VB-CABLE) + 功能說明文件
+
+### 程式（已 commit，全綠 98 測試）
+1. **`6e52247` 長會議整檔精修**：`GeminiLlmService.transcribeAudio` 音訊 >~12MB(約8分鐘)自動改走 **Gemini Files API**(resumable 上傳→輪詢 ACTIVE→file_uri)，繞過 inline ~20MB 請求上限；小檔維持 inline。`MAX_RECORD_SECONDS` 600→3600(10→60分)。已對真 Gemini 端到端實測(TTS 合成→墊到12.6MB→走 Files API→轉錄成功)。
+2. **`602dcd0` 系統收音修復(重要)**：`parseDshowDevices` 原本只認舊版 ffmpeg「DirectShow audio devices」區段標題，**新版 ffmpeg-static 改成每行尾標 (audio)/(video)、無區段標題 → 解析回空 → 「電腦系統」收音整個失效(抓不到任何裝置)**。改成兩格式相容。另 `pickLoopback` 加偏好序(VoiceMeeter B1 > CABLE Output > 任一 VoiceMeeter > Stereo Mix)、`server.ts` 加 `SYSTEM_LOOPBACK_DEVICE` env 覆寫、新增 dshow-parse 回歸測試。
+3. **`356a99b`/`4089f5e`/`5f3d552`** 功能介紹與用法 **HTML＋Word**（含 VooV/Zoom/Teams 線上會議章節）；**`57fdc4c`** 同步 skill 鏡像 `docs/maintenance-skill.md`(原 drift)＋CLAUDE.md 日期。
+
+### 環境設定（非 repo，給接續者：戴耳機/喇叭錄線上會議系統聲）
+- **VoiceMeeter 試了但與機器既有 Potato 驅動版本不匹配、過不了 → 已 `winget uninstall` 移除**。
+- **改用 VB-CABLE**(官網裝、需重開機)：`CABLE Input`(播放)/`CABLE Output`(錄音)。`.env` 加 `SYSTEM_LOOPBACK_DEVICE=CABLE Output`(VoiceMeeter 移除後其實 priority 也會自然選它)。**錄音鏈已用 Leo work 實際收音程式驗證有訊號**。
+- **桌面捷徑「切換錄音音訊」**→ `C:\Users\user\AudioToggle\toggle-audio.ps1`(用 PSGallery 的 AudioDeviceCmdlets，純 ASCII)：一鍵切「CABLE Input(錄音模式) ↔ 喇叭/AirPods(正常)」。
+- **接聽**：CABLE Output「聆聽此裝置 → Speakers」已設(錄音模式時從喇叭聽得到)。**AirPods 在這台藍牙極不穩(當天斷 5~6 次)故走喇叭**；要改 AirPods 私密聽：把接聽目標改成「耳機」。
+- 用法：點捷徑進錄音模式 → 開會議＋Leo work 開🖥️電腦系統錄 → 完再點一次切回。
+
+### 待辦 / 下一步（皆選配）
+- 若 AirPods 要穩定當錄音聽音裝置：解決藍牙連線不穩(或就維持喇叭)。
+- Word/Excel 原生圖表(目前只 PPT)；上 GitHub(建私有 repo + 放行 token)。
+
+---
+
 ## 2026-06-16 — 匯出 Word/Excel/PPT（含 AI 客製＋PPT 自動圖表）+ AI 面板合併 + 收音列移上 header + Gemini 容錯
 
 ### 這段做了什麼（共 6 個 commit）
