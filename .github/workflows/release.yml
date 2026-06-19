@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, ubuntu-22.04, macos-latest]
+        platform: [windows-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -32,12 +32,6 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
-
-      - name: Linux 系統相依（webkit2gtk 等）
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: 安裝 npm 相依
         run: npm ci
