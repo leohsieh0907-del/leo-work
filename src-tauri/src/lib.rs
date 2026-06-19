@@ -36,10 +36,11 @@ pub fn run() {
 #[cfg(not(debug_assertions))]
 fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::Manager;
-    use tauri_plugin_shell::ShellExt;
 
-    // server.cjs 的落點因平台/打包方式而異（Windows 實測在 exe 旁的 sidecar/，
-    // mac/linux 在 Resource 目錄）→ 依序找第一個存在的，找不到就明確報錯。
+    let exe = std::env::current_exe()?;
+    let exe_dir = exe.parent().ok_or("無法取得執行檔目錄")?;
+
+    // server.cjs 落點因平台/打包方式而異 → 依序找第一個存在的，找不到就明確報錯。
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(p) = app
         .path()
@@ -47,26 +48,24 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     {
         candidates.push(p);
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("sidecar").join("server.cjs"));
-            candidates.push(dir.join("resources").join("sidecar").join("server.cjs"));
-        }
-    }
+    candidates.push(exe_dir.join("sidecar").join("server.cjs"));
+    candidates.push(exe_dir.join("resources").join("sidecar").join("server.cjs"));
     let server = candidates
         .into_iter()
         .find(|p| p.exists())
         .ok_or("找不到 sidecar/server.cjs（打包資源缺失）")?;
 
+    // Node runtime（externalBin，打包後在 exe 旁）
+    let node = exe_dir.join(format!("leo-node{}", std::env::consts::EXE_SUFFIX));
     // 加密金鑰/設定/向量庫都放這（每位使用者固定、更新後保留）
     let data_dir = app.path().app_data_dir()?;
 
-    let _child = app
-        .shell()
-        .sidecar("leo-node")?
-        .arg(server.to_string_lossy().to_string())
+    // 直接用 std::process::Command 起（繼承完整環境，與手動實測一致）。
+    // 之前用 tauri shell plugin 的 sidecar() 起不來——改走原生 spawn 避開其環境/權限限制。
+    std::process::Command::new(&node)
+        .arg(&server)
         .env("SIDECAR_PORT", "8765")
-        .env("LEO_DATA_DIR", data_dir.to_string_lossy().to_string())
+        .env("LEO_DATA_DIR", &data_dir)
         .spawn()?;
 
     Ok(())
