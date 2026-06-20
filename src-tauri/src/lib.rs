@@ -59,13 +59,22 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let node = exe_dir.join(format!("leo-node{}", std::env::consts::EXE_SUFFIX));
     // 加密金鑰/設定/向量庫都放這（每位使用者固定、更新後保留）
     let data_dir = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&data_dir)?;
 
-    // 直接用 std::process::Command 起（繼承完整環境，與手動實測一致）。
-    // 之前用 tauri shell plugin 的 sidecar() 起不來——改走原生 spawn 避開其環境/權限限制。
+    // ⚠️ 關鍵根因：GUI 外殼(windows_subsystem=windows)沒有 console，子行程繼承到「無效 stdio
+    // handle」；node 在 init 期間 console.log 寫到壞掉的 stdout → 卡住/出錯 → sidecar 起不來
+    // (實測：重導 stdio 到檔案的手動跑法正常，直接繼承就掛)。把 sidecar 的 stdout/stderr 導到
+    // log 檔(有效 handle)，順便留下啟動錯誤紀錄。
+    let log = std::fs::File::create(data_dir.join("sidecar.log"))?;
+    let log_err = log.try_clone()?;
+
     std::process::Command::new(&node)
         .arg(&server)
         .env("SIDECAR_PORT", "8765")
         .env("LEO_DATA_DIR", &data_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(log_err))
         .spawn()?;
 
     Ok(())
