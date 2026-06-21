@@ -483,26 +483,30 @@ export class GeminiLlmService implements LlmService {
       contents,
       generationConfig: { temperature: 0.3 },
     };
-    let resp: Response;
-    try {
-      resp = await fetchGeminiWithRetry(url, body);
-    } catch (e) {
-      throw new AppError(
-        ErrorCode.CLAUDE_API_ERROR,
-        `無法連線到 Gemini API：${e instanceof Error ? e.message : String(e)}`,
-      );
+    // 空回應多半是 RECITATION 安全過濾誤判（HTTP 200 但 content 為空）；換一次再試，最多 3 次。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let resp: Response;
+      try {
+        resp = await fetchGeminiWithRetry(url, body);
+      } catch (e) {
+        throw new AppError(
+          ErrorCode.CLAUDE_API_ERROR,
+          `無法連線到 Gemini API：${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      const data = (await resp.json().catch(() => null)) as
+        | { candidates?: { content?: { parts?: { text?: string }[] } }[]; error?: { message?: string } }
+        | null;
+      if (!resp.ok) {
+        throw new AppError(
+          ErrorCode.CLAUDE_API_ERROR,
+          geminiErrorMessage("Gemini 對話錯誤：", resp.status, data?.error?.message ?? `HTTP ${resp.status}`),
+        );
+      }
+      const answer = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      if (answer.trim()) return answer.trim();
     }
-    const data = (await resp.json().catch(() => null)) as
-      | { candidates?: { content?: { parts?: { text?: string }[] } }[]; error?: { message?: string } }
-      | null;
-    if (!resp.ok) {
-      throw new AppError(
-        ErrorCode.CLAUDE_API_ERROR,
-        geminiErrorMessage("Gemini 對話錯誤：", resp.status, data?.error?.message ?? `HTTP ${resp.status}`),
-      );
-    }
-    const answer = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-    return answer.trim() || "（沒有產生回覆，請換個方式問問看）";
+    return "（沒有產生回覆，請換個方式問問看）";
   }
 
   /**
