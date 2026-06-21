@@ -41,15 +41,17 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let exe_dir = exe.parent().ok_or("無法取得執行檔目錄")?;
 
     // server.cjs 落點因平台/打包方式而異 → 依序找第一個存在的，找不到就明確報錯。
+    // ⚠️ exe_dir-based（乾淨絕對路徑）放最前；app.path().resolve(Resource) 在 Windows 會回傳
+    // \\?\ verbatim 路徑（Node 解析會爆，見下「關鍵根因 2」），放最後當保底。
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    candidates.push(exe_dir.join("sidecar").join("server.cjs"));
+    candidates.push(exe_dir.join("resources").join("sidecar").join("server.cjs"));
     if let Ok(p) = app
         .path()
         .resolve("sidecar/server.cjs", tauri::path::BaseDirectory::Resource)
     {
         candidates.push(p);
     }
-    candidates.push(exe_dir.join("sidecar").join("server.cjs"));
-    candidates.push(exe_dir.join("resources").join("sidecar").join("server.cjs"));
     let server = candidates
         .into_iter()
         .find(|p| p.exists())
@@ -68,14 +70,19 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let log = std::fs::File::create(data_dir.join("sidecar.log"))?;
     let log_err = log.try_clone()?;
 
-    // ⚠️ 關鍵根因 2：Tauri 在 Windows 的 Resource resolve 會回傳 \\?\ 擴充長度路徑；Node 的
-    // 模組解析器(resolveMainPath)會把它誤判成 'C:'（EISDIR）→ sidecar 永遠起不來。純路徑手動
-    // 跑正常、打包版必爆。傳給 Node 當主程式前去掉 \\?\ 前綴（非 verbatim 路徑則原樣不動）。
-    let server_str = server.to_string_lossy();
-    let server_arg: &str = server_str.strip_prefix(r"\\?\").unwrap_or(&server_str);
+    // ⚠️ 關鍵根因 2（實測定論）：Node 只要拿到 \\?\ 擴充長度路徑（不論在主程式參數或 CWD），
+    // resolveMainPath 都會誤判成 'C:'（EISDIR）→ sidecar 起不來；唯有「乾淨路徑」能起。打包版
+    // app.path().resolve(Resource) 與某些 current_exe 會是 \\?\ verbatim。對策（雙保險）：
+    //   ① candidate 乾淨路徑優先（見上）；② CWD 設為 sidecar 目錄並去掉 \\?\ 前綴，主程式只傳
+    //      「相對檔名 server.cjs」→ 沒有磁碟機代號/空格/verbatim，Node 必能解析。
+    // CWD 不影響資料路徑（server.ts 走 LEO_DATA_DIR env，已於上方帶入）。
+    let server_dir = server.parent().ok_or("無法取得 sidecar 目錄")?;
+    let server_dir_str = server_dir.to_string_lossy();
+    let server_dir_clean: &str = server_dir_str.strip_prefix(r"\\?\").unwrap_or(&server_dir_str);
 
     std::process::Command::new(&node)
-        .arg(server_arg)
+        .current_dir(server_dir_clean)
+        .arg("server.cjs")
         .env("SIDECAR_PORT", "8765")
         .env("LEO_DATA_DIR", &data_dir)
         .stdin(std::process::Stdio::null())
