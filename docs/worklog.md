@@ -37,8 +37,15 @@
 - 本次三修正**都在 sidecar**（不動 Rust 外殼/前端）：CORS 放行 Windows Tauri 來源、chat() 空回應重試。
 - 前置：GitHub Secrets 需有 `TAURI_SIGNING_PRIVATE_KEY`（自動更新簽章）；過去 v0.1.0~0.1.4 build 是否成功未驗證，第一次 build 可能要看 Actions log 除錯。
 
+### B/C 執行結果（已發佈；但自動更新受阻於 private repo）
+- CI 已自動建出 v0.1.5 草稿，**Win+Mac 產物齊全**：`x64-setup.exe`(97MB) + `aarch64.dmg` + `app.tar.gz` + 各 `.sig` + `latest.json`；latest.json **兩平台條目都在**（含 `windows-x86_64`，帶簽章與 URL）。
+- 已用 `gh` 發佈 v0.1.5（`draft=false, make_latest`），GitHub latest release = v0.1.5。
+- 🔴 **C 自動更新對本 repo 無效**：repo 是 **private**。更新器端點 `releases/latest/download/latest.json` 是**匿名抓取**，private repo 的 release 產物即使發佈、匿名仍 **404**（實測兩個公開 URL 皆 404）。
+- ✅ 替代：擁有者登入下可手動下載。已把 `Leo.work_0.1.5_x64-setup.exe` 抓到 `~/Downloads`，**關閉 App → 執行安裝檔即更新**到 0.1.5（含 CORS + chat 修正）。
+- gh 環境：已 `winget` 裝 gh；token 取自 `~/.git-credentials`（**第 2 條**才有 leo-work 權限，第 1 條是別的 repo）。此 PAT **無 Actions 權限（讀 runs 403）**，故無法用 gh 看 build log；releases/contents 可用。
+
 ### 待辦
-- ⏳ **B**：v0.1.5 CI build 跑完 → GitHub → Releases 把草稿按 Publish。**C**：桌面 App 下次開啟由 updater 自動更新（0.1.5 > 0.1.4）。
+- 🟠 **決定自動更新策略**：要真正 OTA 自動更新 → repo 設 **public**（程式碼公開；`.env`/金鑰已 gitignore）；或維持 private、每次發版**手動下載安裝**（不建議把 token 包進 App）。
 - 🟡 dev sidecar 與正式版 sidecar 都要 8765 → 兩者**不能同時跑**（會搶 port）；用桌面 App 時別同時開 bat 的 `npm run dev`。
 - 🔴 `lib.rs` spawn 的 sidecar 在 App 關閉時未 kill → 8765 殘留下次起不來。
 - 🔴 CI 尚未實際 build 成功驗證打包/spawn（首次 build 是舊 commit，不含里程碑 3）。
