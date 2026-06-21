@@ -27,8 +27,18 @@
 - **修法**：`server.ts:226` CORS origin 陣列加入 `http://tauri.localhost`、`https://tauri.localhost`。dev sidecar(tsx watch)熱重載後 curl 帶 `Origin: http://tauri.localhost` 已回正確 ACAO；`npm run typecheck` 雙 tsconfig 全綠。
 - **但書（重要）**：現在桌面 App 能連是因為接到「我熱重載過的 dev sidecar」。**正式打包版自己內建的 sidecar 仍是舊 build、仍含舊 CORS** → 一旦不靠 dev、回去用自帶 sidecar 就會再壞。**永久修＝此 commit 走 CI 重新打包**（本機無 Rust 不能打包）。
 
-### 待辦（沿用，未動）
-- 🟡 桌面正式版永久生效：把本次 CORS 修正走 CI 重打包（本機無 Rust）。
+### AI 助理「沒有產生回覆」→ chat() 空回應未重試（已修 GeminiLlmService）
+- 桌面 App 問「幫我總結三個重點」回「（沒有產生回覆，請換個方式問問看）」。直接打 `/chat` 重現→其實間歇成功（還引用到跨會議記憶，記憶檢索正常）。
+- 根因：`GeminiLlmService.chat()` 雖用 `fetchGeminiWithRetry`（處理 5xx/429），但**沒處理「HTTP 200 但內容空」的 RECITATION 誤判**（約 1/3），且**只試一次就回 fallback**，不像 `generate()` 會重試 3 次。
+- 修法：`chat()` 改為 for 迴圈、空回應自動換一次再試最多 3 次，3 次都空才回 fallback。typecheck 雙 tsconfig 綠、`/chat` 連打皆正常、`npm test` 98 全綠。
+
+### 發版：v0.1.5（CI 打包；B/C＝GitHub 發佈草稿 + App 自動更新）
+- 升版 `0.1.4 → 0.1.5`（package.json + tauri.conf.json），push main + 推 tag `v0.1.5` 觸發 `.github/workflows/release.yml`（Win+Mac matrix → 草稿 Release）。
+- 本次三修正**都在 sidecar**（不動 Rust 外殼/前端）：CORS 放行 Windows Tauri 來源、chat() 空回應重試。
+- 前置：GitHub Secrets 需有 `TAURI_SIGNING_PRIVATE_KEY`（自動更新簽章）；過去 v0.1.0~0.1.4 build 是否成功未驗證，第一次 build 可能要看 Actions log 除錯。
+
+### 待辦
+- ⏳ **B**：v0.1.5 CI build 跑完 → GitHub → Releases 把草稿按 Publish。**C**：桌面 App 下次開啟由 updater 自動更新（0.1.5 > 0.1.4）。
 - 🟡 dev sidecar 與正式版 sidecar 都要 8765 → 兩者**不能同時跑**（會搶 port）；用桌面 App 時別同時開 bat 的 `npm run dev`。
 - 🔴 `lib.rs` spawn 的 sidecar 在 App 關閉時未 kill → 8765 殘留下次起不來。
 - 🔴 CI 尚未實際 build 成功驗證打包/spawn（首次 build 是舊 commit，不含里程碑 3）。
