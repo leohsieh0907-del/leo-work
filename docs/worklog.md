@@ -8,12 +8,13 @@
 
 ## 2026-06-21 — 排查「桌面與網站都連不上」：實為 dev server 沒啟動（非崩潰）
 
-### 📌 下次接續（最重要：v0.1.6 發佈流程未完）
+### 📌 下次接續（最重要：v0.1.7 發佈流程未完）
 新對話讀此即可續做，**不需重新查**：
-1. **v0.1.6 已 push + tag、CI 建置中**。要做：① 等 CI 出 v0.1.6 草稿 Release（用 `gh api .../releases` 看，**別用 Actions**——此 PAT 無 Actions 權限會 403）；② 確認 6 產物齊（`x64-setup.exe`/`aarch64.dmg`/兩個 `.sig`/`app.tar.gz`/`latest.json`）；③ 發佈：`gh api -X PATCH repos/leohsieh0907-del/leo-work/releases/<id> -F draft=false -f make_latest=true`；④ 下載：`gh release download v0.1.6 --repo leohsieh0907-del/leo-work --pattern "*x64-setup.exe" --dir ~/Downloads`；⑤ 請庭晰**關掉 App + 關掉暫時 sidecar**，重裝。裝完才是真正獨立版（App 自己 spawn、不靠 bat/手動）。
+1. **v0.1.7 已 push + tag、CI 建置中**（v0.1.5/0.1.6 的 sidecar spawn 仍壞，**只有 v0.1.7 修對**，見「sidecar spawn」段）。要做：① 等 CI 出 v0.1.7 草稿 Release（`gh api .../releases` 看，**別用 Actions**——PAT 無 Actions 權限會 403）；② 確認 6 產物齊（`x64-setup.exe`/`aarch64.dmg`/兩個 `.sig`/`app.tar.gz`/`latest.json`）；③ 發佈：`gh api -X PATCH repos/leohsieh0907-del/leo-work/releases/<id> -F draft=false -f make_latest=true`；④ 下載：`gh release download v0.1.7 --repo leohsieh0907-del/leo-work --pattern "*x64-setup.exe" --dir ~/Downloads`；⑤ 請庭晰**關掉 App + 關掉暫時 sidecar**，重裝；⑥ 驗證：launch 後 `Get-Process leo-node` 有、`GET :8765/health` 通＝spawn 修對。
 2. **gh 環境**：已 `winget` 裝 gh（`C:\Program Files\GitHub CLI\gh.exe`）。認證用 **`GH_TOKEN` 環境變數**，token 取自 `~/.git-credentials` 的 **第 2 條** `leohsieh0907-del`（第 1 條是別的 repo、對 leo-work 回 404）。`--with-token` 經 PowerShell stdin 會被換行搞壞→用 env 即可。
-3. **過渡狀態**：目前 8765 是手動 `Start-Process "%LOCALAPPDATA%\Leo work\leo-node.exe" "...\sidecar\server.cjs"`（帶 `LEO_DATA_DIR=%APPDATA%\com.leowork.desktop`、`SIDECAR_PORT=8765`）起的，**重開機就沒**；現有 v0.1.5 App 靠它在線。
-4. private repo → tauri 更新器匿名抓不到 → 自動更新無效，一律**手動下載安裝**。
+3. **過渡狀態**：8765 由手動 `Start-Process leo-node.exe -ArgumentList "server.cjs" -WorkingDirectory "%LOCALAPPDATA%\Leo work\sidecar"`（**乾淨 CWD + 相對檔名才起得來**；帶 `LEO_DATA_DIR=%APPDATA%\com.leowork.desktop`、`SIDECAR_PORT=8765`）起著頂；**重開機就沒**。
+4. **AI 金鑰未設**：正式版 `hasGeminiKey=false`、`llmProvider=ollama`。POST `/config`{geminiApiKey,llmProvider:"gemini",geminiModel} 後**要重啟 App 才生效**（讀 live env）；但實測我的 POST 沒寫進 config.json（可能 data dir 解析也受 verbatim 影響）→ 待 v0.1.7 裝好（路徑乾淨）再從 App ⚙️ 設定填，或重試 POST。
+5. private repo → tauri 更新器匿名抓不到 → 自動更新無效，一律**手動下載安裝**。
 
 ### 狀況
 - 桌面 App 卡在「本機服務未就緒，重試中…」「離線」；瀏覽器 `localhost` `ERR_CONNECTION_REFUSED`。
