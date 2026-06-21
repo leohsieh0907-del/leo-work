@@ -68,8 +68,14 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let log = std::fs::File::create(data_dir.join("sidecar.log"))?;
     let log_err = log.try_clone()?;
 
+    // ⚠️ 關鍵根因 2：Tauri 在 Windows 的 Resource resolve 會回傳 \\?\ 擴充長度路徑；Node 的
+    // 模組解析器(resolveMainPath)會把它誤判成 'C:'（EISDIR）→ sidecar 永遠起不來。純路徑手動
+    // 跑正常、打包版必爆。傳給 Node 當主程式前去掉 \\?\ 前綴（非 verbatim 路徑則原樣不動）。
+    let server_str = server.to_string_lossy();
+    let server_arg: &str = server_str.strip_prefix(r"\\?\").unwrap_or(&server_str);
+
     std::process::Command::new(&node)
-        .arg(&server)
+        .arg(server_arg)
         .env("SIDECAR_PORT", "8765")
         .env("LEO_DATA_DIR", &data_dir)
         .stdin(std::process::Stdio::null())
