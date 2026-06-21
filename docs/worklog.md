@@ -44,9 +44,19 @@
 - ✅ 替代：擁有者登入下可手動下載。已把 `Leo.work_0.1.5_x64-setup.exe` 抓到 `~/Downloads`，**關閉 App → 執行安裝檔即更新**到 0.1.5（含 CORS + chat 修正）。
 - gh 環境：已 `winget` 裝 gh；token 取自 `~/.git-credentials`（**第 2 條**才有 leo-work 權限，第 1 條是別的 repo）。此 PAT **無 Actions 權限（讀 runs 403）**，故無法用 gh 看 build log；releases/contents 可用。
 
+### 🔴→✅ 裝完 v0.1.5 仍離線：sidecar spawn 的 `\\?\` 路徑 bug（已修 lib.rs，發 v0.1.6）
+- 裝好 v0.1.5 開啟 → 仍「本機服務未就緒」、8765 沒起來、**無 leo-node 程序**。手動 `leo-node.exe sidecar/server.cjs`（純路徑）**完全正常** → 問題在 lib.rs spawn 本身。
+- `app_data_dir/sidecar.log`（lib.rs 已把 spawn 的 stdio 導到這）真因：`Error: EISDIR ... lstat 'C:'` at `resolveMainPath`。
+- 根因：lib.rs spawn 第一順位用 `app.path().resolve("sidecar/server.cjs", Resource)`，**Windows 回傳 `\\?\C:\...` 擴充長度路徑** → Node 模組解析器把主程式路徑誤判成 `C:` → sidecar 永遠起不來。用 `\\?\` 前綴路徑手動跑，error 完全一致（鐵證）。**這就是「打包/spawn 從沒驗證成功」一直卡住的真因**。
+- 修：`lib.rs` spawn 傳給 Node 當主程式前 `strip_prefix(r"\\?\")`（非 verbatim 路徑原樣）。升版 0.1.6 重走 CI。本機無 Rust 不能編譯，但 strip 後＝純路徑、純路徑已實證能正常啟動 sidecar。
+- 過渡：已手動 `Start-Process leo-node.exe sidecar/server.cjs` 起一顆 8765 sidecar 頂著，現有 v0.1.5 App 可正常用（重開機/關掉就沒了，等 0.1.6）。
+- 安裝位置：`%LOCALAPPDATA%\Leo work\`（leo-node.exe 72MB + sidecar/server.cjs + leo-work.exe）。
+
 ### 待辦
-- 🟠 **決定自動更新策略**：要真正 OTA 自動更新 → repo 設 **public**（程式碼公開；`.env`/金鑰已 gitignore）；或維持 private、每次發版**手動下載安裝**（不建議把 token 包進 App）。
-- 🟡 dev sidecar 與正式版 sidecar 都要 8765 → 兩者**不能同時跑**（會搶 port）；用桌面 App 時別同時開 bat 的 `npm run dev`。
+- ⏳ v0.1.6 CI build → 發佈 → 手動下載重裝（同 private repo 限制，更新器匿名抓不到）。裝完才是**真正獨立、不靠 bat/手動 sidecar** 的版本。
+- 🟠 **決定自動更新策略**：要真正 OTA → repo 設 **public**（程式碼公開；`.env`/金鑰已 gitignore）；或維持 private、每次發版**手動下載安裝**（不建議把 token 包進 App）。
+- 🟡 **里程碑 3 殘留**：lib.rs spawn 的 sidecar 在 App 關閉時仍未 kill → 8765 殘留（下次靠舊 sidecar 也能連，但會用到舊版）。本次未一起改（避免無法本機編譯的 Rust 改動過大），留待下次。
+- 🟡 dev sidecar 與正式版 sidecar 都要 8765 → **不能同時跑**；用桌面 App 時別同時開 bat 的 `npm run dev`。
 - 🔴 `lib.rs` spawn 的 sidecar 在 App 關閉時未 kill → 8765 殘留下次起不來。
 - 🔴 CI 尚未實際 build 成功驗證打包/spawn（首次 build 是舊 commit，不含里程碑 3）。
 
