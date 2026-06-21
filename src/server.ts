@@ -223,7 +223,8 @@ async function runBatchSummary(fileId: string, data: Buffer): Promise<void> {
 // ─────────────── App ───────────────
 
 const app = express();
-app.use(cors({ origin: ["http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost"] }));
+// 注意：Windows 上 Tauri v2 的 webview 來源是 http(s)://tauri.localhost，mac/Linux 才是 tauri://localhost，兩者都要放行。
+app.use(cors({ origin: ["http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"] }));
 app.use(express.json({ limit: "50mb" })); // 容納錄音音訊的 base64（16kHz mono WAV 約 42KB/秒）
 
 // 包裝 async route，集中錯誤處理

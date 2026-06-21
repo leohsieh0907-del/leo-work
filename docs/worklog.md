@@ -6,6 +6,35 @@
 
 ---
 
+## 2026-06-21 — 排查「桌面與網站都連不上」：實為 dev server 沒啟動（非崩潰）
+
+### 狀況
+- 桌面 App 卡在「本機服務未就緒，重試中…」「離線」；瀏覽器 `localhost` `ERR_CONNECTION_REFUSED`。
+
+### 根因 / 處理
+- 實測 `Get-NetTCPConnection 1420,8765` → **兩個 port 都無程序在聽**（一堆 node 程序是 Claude/MCP 自己的，不在那兩 port）。根因＝**dev server 根本沒在跑**，不是當機。
+- 用 `start-leo-work.bat` **獨立 cmd 視窗**啟動（殺舊 port → `npm run dev` → 8s 後開瀏覽器）；**不掛 Claude 背景程序**（會被回收殺掉，已知雷 #10）。
+- 輪詢確認：vite 1420 ✅、sidecar 8765 ✅、`GET /health` 回 `{ok:true}`。桌面 App 會自動由「重試中」轉在線。
+
+### 釐清一個誤判（重要，別再踩）
+- `/health` 回 `provider:"local"` **不是 LLM**，是 **embedding provider**（`server.ts:236` 回的是 `EMBED_PROVIDER`＝`EMBEDDING_PROVIDER=local`，本地離線 ONNX 向量，刻意如此）。
+- 查 `.env`：`LLM_PROVIDER=gemini` ✅、`GEMINI_API_KEY` 已設(39字) ✅、`GEMINI_MODEL=gemini-2.5-flash`、`server.ts:7 import "dotenv/config"` 確認有載入。
+- 結論：**LLM 本來就是 Gemini，分析/翻譯/聊天/轉錄/STT/匯出都走 Gemini，無需改動**。
+
+### 桌面 App 仍離線 → 根因＝CORS 漏放行 Windows Tauri 來源（已修 server.ts）
+- 網站(1420)修好後**桌面 App 仍「離線」**。實測程序：`leo-work` PID 在跑＝**正式打包版桌面 App**；8765 被我用 bat 起的 dev sidecar 佔住，正式版自己 spawn 的 sidecar（`leo-node`）起不來。
+- 真正根因（curl 帶 Origin 實測）：`server.ts` CORS 白名單只有 `http://localhost:1420`、`127.0.0.1:1420`、`tauri://localhost`（後者是 **mac/Linux** 的來源）。**Windows 上 Tauri v2 webview 來源是 `http(s)://tauri.localhost`** → 回應無 `Access-Control-Allow-Origin` → webview 的 `/health` 被 CORS 擋 → 一直「未就緒」。這也解釋桌面 App 在 Windows 上一直連不上（即使用自己的 sidecar 也會被同 CORS 擋）。
+- **修法**：`server.ts:226` CORS origin 陣列加入 `http://tauri.localhost`、`https://tauri.localhost`。dev sidecar(tsx watch)熱重載後 curl 帶 `Origin: http://tauri.localhost` 已回正確 ACAO；`npm run typecheck` 雙 tsconfig 全綠。
+- **但書（重要）**：現在桌面 App 能連是因為接到「我熱重載過的 dev sidecar」。**正式打包版自己內建的 sidecar 仍是舊 build、仍含舊 CORS** → 一旦不靠 dev、回去用自帶 sidecar 就會再壞。**永久修＝此 commit 走 CI 重新打包**（本機無 Rust 不能打包）。
+
+### 待辦（沿用，未動）
+- 🟡 桌面正式版永久生效：把本次 CORS 修正走 CI 重打包（本機無 Rust）。
+- 🟡 dev sidecar 與正式版 sidecar 都要 8765 → 兩者**不能同時跑**（會搶 port）；用桌面 App 時別同時開 bat 的 `npm run dev`。
+- 🔴 `lib.rs` spawn 的 sidecar 在 App 關閉時未 kill → 8765 殘留下次起不來。
+- 🔴 CI 尚未實際 build 成功驗證打包/spawn（首次 build 是舊 commit，不含里程碑 3）。
+
+---
+
 ## 2026-06-16（續）— 長會議整檔精修 + 系統收音修復 + 線上會議收音落地(VB-CABLE) + 功能說明文件
 
 ### 程式（已 commit，全綠 98 測試）
