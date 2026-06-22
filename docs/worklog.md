@@ -8,13 +8,19 @@
 
 ## 2026-06-21 — 排查「桌面與網站都連不上」：實為 dev server 沒啟動（非崩潰）
 
-### 📌 下次接續（最重要：v0.1.7 發佈流程未完）
-新對話讀此即可續做，**不需重新查**：
-1. **v0.1.7 已 push + tag、CI 建置中**（v0.1.5/0.1.6 的 sidecar spawn 仍壞，**只有 v0.1.7 修對**，見「sidecar spawn」段）。要做：① 等 CI 出 v0.1.7 草稿 Release（`gh api .../releases` 看，**別用 Actions**——PAT 無 Actions 權限會 403）；② 確認 6 產物齊（`x64-setup.exe`/`aarch64.dmg`/兩個 `.sig`/`app.tar.gz`/`latest.json`）；③ 發佈：`gh api -X PATCH repos/leohsieh0907-del/leo-work/releases/<id> -F draft=false -f make_latest=true`；④ 下載：`gh release download v0.1.7 --repo leohsieh0907-del/leo-work --pattern "*x64-setup.exe" --dir ~/Downloads`；⑤ 請庭晰**關掉 App + 關掉暫時 sidecar**，重裝；⑥ 驗證：launch 後 `Get-Process leo-node` 有、`GET :8765/health` 通＝spawn 修對。
-2. **gh 環境**：已 `winget` 裝 gh（`C:\Program Files\GitHub CLI\gh.exe`）。認證用 **`GH_TOKEN` 環境變數**，token 取自 `~/.git-credentials` 的 **第 2 條** `leohsieh0907-del`（第 1 條是別的 repo、對 leo-work 回 404）。`--with-token` 經 PowerShell stdin 會被換行搞壞→用 env 即可。
-3. **過渡狀態**：8765 由手動 `Start-Process leo-node.exe -ArgumentList "server.cjs" -WorkingDirectory "%LOCALAPPDATA%\Leo work\sidecar"`（**乾淨 CWD + 相對檔名才起得來**；帶 `LEO_DATA_DIR=%APPDATA%\com.leowork.desktop`、`SIDECAR_PORT=8765`）起著頂；**重開機就沒**。
-4. **AI 金鑰未設**：正式版 `hasGeminiKey=false`、`llmProvider=ollama`。POST `/config`{geminiApiKey,llmProvider:"gemini",geminiModel} 後**要重啟 App 才生效**（讀 live env）；但實測我的 POST 沒寫進 config.json（可能 data dir 解析也受 verbatim 影響）→ 待 v0.1.7 裝好（路徑乾淨）再從 App ⚙️ 設定填，或重試 POST。
-5. private repo → tauri 更新器匿名抓不到 → 自動更新無效，一律**手動下載安裝**。
+### ✅ 結果（全部完成 2026-06-22）
+- **v0.1.7 已發佈並安裝，庭晰正常開啟後完全獨立運作**：App 自己 spawn sidecar（leo-node）、8765 health OK、CORS 放行、**Gemini 金鑰生效**（`hasGeminiKey=true`、`llmProvider=gemini`）。不用 bat、不用手動 sidecar。
+- GitHub latest release = v0.1.7（v0.1.1~0.1.6 草稿仍未發佈、無妨）。
+
+### 🕳️ 最大教訓（務必記住，省下大量鬼打牆）
+- **絕對不要從 Claude（桌面版，MSIX 沙盒）用 `Start-Process` 啟動 leo-work.exe 來「驗證」**。Claude 是 MSIX 封裝 App，子行程會繼承它的 **AppData 重導向**（`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\...`），導致 `app_data_dir()`／資源路徑變成被虛擬化的怪路徑 → sidecar spawn 出現假性 `EISDIR 'C:'`。**這是 v0.1.5/0.1.6 反覆「還是壞」的真兇——不是程式 bug，是我的啟動方式**。
+- **正確驗證法**：請庭晰**自己從桌面/開始功能表開啟**，Claude 端只用 `Invoke-RestMethod http://localhost:8765/health`、`Get-Process leo-node`、讀 `/config` 從**外部**觀察（不受沙盒影響）。
+- lib.rs 的 spawn 強化（candidate 乾淨路徑優先＋CWD＋相對檔名 server.cjs）仍是**更穩健、該留**；只是「一直壞」的觀感主要來自上面的啟動方式。
+
+### 仍未做（選配，不急）
+- 🟠 自動更新：repo 是 **private** → tauri 更新器匿名抓不到 → 不會 OTA。要嘛把 repo 設 public，要嘛每次發版手動下載安裝（已驗證可行：`gh release download`）。
+- 🟡 lib.rs spawn 的 sidecar 在 App 關閉時未 kill（8765 殘留；下次靠舊 sidecar 也能連，但會用到舊版）。
+- gh 環境備忘：已 winget 裝 gh；認證用 `GH_TOKEN`（token 取自 `~/.git-credentials` **第 2 條** leohsieh，第 1 條是別 repo）；此 PAT **無 Actions 權限**（看 build 只能用 releases 端點，不能用 Actions）。
 
 ### 狀況
 - 桌面 App 卡在「本機服務未就緒，重試中…」「離線」；瀏覽器 `localhost` `ERR_CONNECTION_REFUSED`。
