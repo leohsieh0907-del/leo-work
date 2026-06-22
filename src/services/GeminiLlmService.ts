@@ -460,10 +460,13 @@ export class GeminiLlmService implements LlmService {
     currentTranscript: string,
     memoryContext: string,
     history: ChatTurn[],
-  ): Promise<string> {
+  ): Promise<{ answer: string; suggestions: string[] }> {
     const system =
       "你是會議 AI 助理。請根據下方的『當前會議逐字稿』與『相關歷史記憶』，用繁體中文自然、扼要地回答使用者的問題。\n" +
-      "原則：有依據才回答，沒有依據就老實說「目前資料看不出來」，不要編造；可整理重點、列待辦、做比較。\n\n" +
+      "原則：有依據才回答，沒有依據就老實說「目前資料看不出來」，不要編造；可整理重點、列待辦、做比較。\n" +
+      "回答完畢後，另起一行只輸出標記「###建議###」，接著每行列出一個使用者接下來最可能想問或想做的事" +
+      "（簡短祈使句，約 8~18 字，可直接當成下一個問題送出），最多 3 個、每行一個，不要編號或多餘文字；" +
+      "想不到合適建議就完全不要輸出這段標記。\n\n" +
       "=== 當前會議逐字稿 ===\n" +
       (currentTranscript.trim() || "（尚無逐字稿）") +
       "\n\n=== 相關歷史記憶 ===\n" +
@@ -503,10 +506,11 @@ export class GeminiLlmService implements LlmService {
           geminiErrorMessage("Gemini 對話錯誤：", resp.status, data?.error?.message ?? `HTTP ${resp.status}`),
         );
       }
-      const answer = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-      if (answer.trim()) return answer.trim();
+      const raw = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      const parsed = splitChatSuggestions(raw);
+      if (parsed.answer) return parsed;
     }
-    return "（沒有產生回覆，請換個方式問問看）";
+    return { answer: "（沒有產生回覆，請換個方式問問看）", suggestions: [] };
   }
 
   /**
@@ -622,6 +626,23 @@ async function parse429RetryMs(resp: Response): Promise<number | null> {
     .find((s): s is string => typeof s === "string");
   const m = /([\d.]+)\s*s/.exec(fromDetails ?? data?.error?.message ?? "");
   return m ? Math.ceil(parseFloat(m[1]) * 1000) : null;
+}
+
+/** chat 回應的「後續建議」標記。用純文字標記而非 responseSchema，避免觸發 RECITATION 空回應。 */
+const CHAT_SUGGEST_MARKER = "###建議###";
+
+/** 從 chat 原始回應拆出「正文」與「後續建議」（最多 3 條）；無標記則建議為空、正文照舊。 */
+function splitChatSuggestions(raw: string): { answer: string; suggestions: string[] } {
+  const idx = raw.indexOf(CHAT_SUGGEST_MARKER);
+  if (idx === -1) return { answer: raw.trim(), suggestions: [] };
+  const answer = raw.slice(0, idx).trim();
+  const suggestions = raw
+    .slice(idx + CHAT_SUGGEST_MARKER.length)
+    .split("\n")
+    .map((l) => l.replace(/^[-*•\d.、)\s]+/, "").trim()) // 去掉可能的項目符號/編號
+    .filter((l) => l.length > 0)
+    .slice(0, 3);
+  return { answer, suggestions };
 }
 
 /**

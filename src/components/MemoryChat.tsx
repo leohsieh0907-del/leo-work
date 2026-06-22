@@ -23,6 +23,7 @@ const SUGGESTIONS: { icon: string; label: string; prompt: string }[] = [
 
 export default function MemoryChat() {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]); // 上一則回答後的「接下來可做」建議
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -32,11 +33,13 @@ export default function MemoryChat() {
     const history = messages;
     setMessages((m) => [...m, { role: "user", text: q }]);
     setInput("");
+    setSuggestions([]); // 送新問題就先收掉舊建議
     setLoading(true);
     try {
       // 記憶聊天沒有「當前逐字稿」，純靠跨會議記憶
       const r = await chat({ question: q, transcript: "", history });
       setMessages((m) => [...m, { role: "assistant", text: r.answer }]);
+      setSuggestions(r.suggestions ?? []);
     } catch (e) {
       setMessages((m) => [
         ...m,
@@ -66,7 +69,10 @@ export default function MemoryChat() {
             <h2 className="text-sm font-semibold text-slate-200">記憶聊天</h2>
             <span className="text-xs text-slate-500">跨會議記憶</span>
             <button
-              onClick={() => setMessages([])}
+              onClick={() => {
+                setMessages([]);
+                setSuggestions([]);
+              }}
               className="ml-auto text-xs text-slate-500 hover:text-slate-300"
             >
               ＋ 新對話
@@ -91,6 +97,22 @@ export default function MemoryChat() {
                   <div className="rounded-lg bg-brand-panel px-3 py-2 text-sm text-slate-400">思考中…</div>
                 </div>
               )}
+              {!loading && suggestions.length > 0 && (
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <span className="text-[11px] text-slate-500">💡 接下來可以…</span>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestions.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => void send(s)}
+                        className="rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs text-slate-200 transition hover:bg-brand/20"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -112,7 +134,7 @@ export default function MemoryChat() {
           <div className="mx-auto w-full max-w-3xl px-6 py-12">
             <div className="mb-2 flex items-center justify-center gap-3">
               <span className="text-4xl">🦉</span>
-              <h1 className="text-3xl font-bold text-slate-100">Leo work 可以幫您做些什麼？</h1>
+              <h1 className="text-3xl font-bold text-slate-100">語音轉文字 可以幫您做些什麼？</h1>
             </div>
             <p className="mb-8 text-center text-lg font-medium text-slate-400">您的記憶在內</p>
 
@@ -126,7 +148,7 @@ export default function MemoryChat() {
             />
 
             <p className="mb-3 mt-10 text-sm text-slate-400">
-              看看 Leo work 的記憶聊天能為您做些什麼：
+              看看語音轉文字的記憶聊天能為您做些什麼：
             </p>
             <div className="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10 bg-brand-panel/40">
               {SUGGESTIONS.map((s) => (

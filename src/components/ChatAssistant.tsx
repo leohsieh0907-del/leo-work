@@ -52,6 +52,7 @@ export default function ChatAssistant({
   onCollapse?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]); // 上一則回答後的「接下來可做」建議
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -66,10 +67,12 @@ export default function ChatAssistant({
     const history = messages;
     setMessages((m) => [...m, { role: "user", text: q }]);
     setInput("");
+    setSuggestions([]); // 送新問題就先收掉舊建議
     setLoading(true);
     try {
       const r = await chat({ question: q, transcript, history });
       setMessages((m) => [...m, { role: "assistant", text: r.answer }]);
+      setSuggestions(r.suggestions ?? []);
     } catch (e) {
       setMessages((m) => [
         ...m,
@@ -166,7 +169,13 @@ export default function ChatAssistant({
         <span className="hidden text-xs text-slate-500 sm:inline">問當前會議 ＋ 跨會議記憶 ＋ 討論完匯出</span>
         <div className="ml-auto flex items-center gap-3">
           {messages.length > 0 && (
-            <button onClick={() => setMessages([])} className="text-xs text-slate-500 hover:text-slate-300">
+            <button
+              onClick={() => {
+                setMessages([]);
+                setSuggestions([]);
+              }}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
               清空
             </button>
           )}
@@ -243,6 +252,22 @@ export default function ChatAssistant({
         {loading && (
           <div className="flex justify-start">
             <div className="rounded-lg bg-brand-panel px-3 py-2 text-sm text-slate-400">思考中…</div>
+          </div>
+        )}
+        {!loading && suggestions.length > 0 && (
+          <div className="flex flex-col gap-1.5 pt-1">
+            <span className="text-[11px] text-slate-500">💡 接下來可以…</span>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => void send(s)}
+                  className="rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs text-slate-200 transition hover:bg-brand/20"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

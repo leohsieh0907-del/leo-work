@@ -21,7 +21,7 @@ export const PHONE_PAGE_HTML: string = String.raw`<!DOCTYPE html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>Leo work 手機收音</title>
+<title>語音轉文字 手機收音</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -72,7 +72,7 @@ export const PHONE_PAGE_HTML: string = String.raw`<!DOCTYPE html>
 </head>
 <body>
 <div class="wrap">
-  <h1>Leo work 手機收音</h1>
+  <h1>語音轉文字 手機收音</h1>
   <div class="status">
     <span class="dot" id="dot"></span>
     <span id="statusText">未連線</span>

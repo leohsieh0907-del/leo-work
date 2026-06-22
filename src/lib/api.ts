@@ -85,7 +85,7 @@ export function chat(req: {
   question: string;
   transcript: string;
   history: ChatTurn[];
-}): Promise<{ answer: string }> {
+}): Promise<{ answer: string; suggestions?: string[] }> {
   return post("/chat", req);
 }
 

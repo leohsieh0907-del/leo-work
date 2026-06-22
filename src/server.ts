@@ -375,8 +375,8 @@ app.post(
       throw new AppError(ErrorCode.CONFIG_MISSING, "AI 助理需要 GEMINI_API_KEY，請於 .env 設定");
     }
     const memory = await vectorStore.queryHistoricalContext(question, 3).catch(() => "");
-    const answer = await geminiStt.chat(question, transcript ?? "", memory, history ?? []);
-    res.json({ answer });
+    const result = await geminiStt.chat(question, transcript ?? "", memory, history ?? []);
+    res.json(result); // { answer, suggestions }
   }),
 );
 

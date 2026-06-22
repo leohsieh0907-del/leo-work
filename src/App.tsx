@@ -73,7 +73,7 @@ export default function App() {
       <header className="flex items-center gap-3 border-b border-white/10 bg-brand-panel px-5 py-2.5">
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-brand-accent text-lg">◆</span>
-          <h1 className="text-base font-semibold tracking-wide">Leo work</h1>
+          <h1 className="text-base font-semibold tracking-wide">語音轉文字</h1>
           <span className="ml-1 hidden rounded bg-white/5 px-2 py-0.5 text-xs text-slate-400 xl:inline">
             本地隱私 · 跨會議記憶
           </span>
