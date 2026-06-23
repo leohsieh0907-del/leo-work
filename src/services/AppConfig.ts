@@ -101,9 +101,15 @@ export function updateRuntimeConfig(patch: RuntimeConfigFile): void {
 }
 
 /** 給設定畫面用：回報非機密的設定狀態（不外洩金鑰值）。 */
-export function getRuntimeConfigStatus(): { hasGeminiKey: boolean; llmProvider: string; geminiModel?: string } {
+export function getRuntimeConfigStatus(): {
+  hasGeminiKey: boolean;
+  hasGroqKey: boolean;
+  llmProvider: string;
+  geminiModel?: string;
+} {
   return {
     hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+    hasGroqKey: Boolean(process.env.GROQ_API_KEY), // Groq 後援（過載時接手文字任務）
     llmProvider: process.env.LLM_PROVIDER ?? "ollama",
     geminiModel: process.env.GEMINI_MODEL,
   };

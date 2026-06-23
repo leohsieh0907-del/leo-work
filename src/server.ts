@@ -22,6 +22,8 @@ import { ClaudeService } from "./services/ClaudeService";
 import { OllamaLlmService } from "./services/OllamaLlmService";
 import { GeminiLlmService } from "./services/GeminiLlmService";
 import { GeminiLiveService } from "./services/GeminiLiveService";
+import { GroqLlmService } from "./services/GroqLlmService";
+import { FallbackLlmService } from "./services/FallbackLlmService";
 import type { LlmService } from "./services/llm/types";
 import { SystemAudioCapture } from "./services/audio/SystemAudioCapture";
 import { PhoneBridgeServer } from "./services/audio/PhoneBridgeServer";
@@ -115,12 +117,24 @@ function buildLlm(): LlmService {
     model: process.env.OLLAMA_LLM_MODEL,
   });
 }
-const llm: LlmService = buildLlm();
+let llm: LlmService = buildLlm();
 
 // 語音轉文字（STT）：用 Gemini 直接聽錄音音訊（需 GEMINI_API_KEY；與 LLM_PROVIDER 無關）。
 const geminiStt = process.env.GEMINI_API_KEY
   ? new GeminiLlmService({ apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_MODEL })
   : null;
+
+// Groq 後援（OpenAI 相容、LPU 快、免費額度大）：Gemini 過載(503)/限流(429) 時自動接手「文字任務」。
+// 即時逐字稿(Live)與整檔精修(聽音訊)為 Gemini 專屬，不在後援範圍。
+const groq = process.env.GROQ_API_KEY
+  ? new GroqLlmService({ apiKey: process.env.GROQ_API_KEY, model: process.env.GROQ_MODEL })
+  : null;
+// 分析/翻譯：主力 llm 是 Gemini 時，包一層 Groq 後援。
+if (groq && llm instanceof GeminiLlmService) {
+  llm = new FallbackLlmService(llm, groq);
+}
+// 聊天：geminiStt 為主、groq 為援（無 groq 則退回純 geminiStt）。
+const chatLlm = geminiStt && groq ? new FallbackLlmService(geminiStt, groq) : geminiStt;
 
 // ─────────────── 雙源收音引擎 ───────────────
 
@@ -371,11 +385,11 @@ app.post(
       history?: ChatTurn[];
     };
     if (!question) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 question");
-    if (!geminiStt) {
+    if (!chatLlm) {
       throw new AppError(ErrorCode.CONFIG_MISSING, "AI 助理需要 GEMINI_API_KEY，請於 .env 設定");
     }
     const memory = await vectorStore.queryHistoricalContext(question, 3).catch(() => "");
-    const result = await geminiStt.chat(question, transcript ?? "", memory, history ?? []);
+    const result = await chatLlm.chat(question, transcript ?? "", memory, history ?? []);
     res.json(result); // { answer, suggestions }
   }),
 );
