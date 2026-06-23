@@ -2,7 +2,7 @@
 // 左：歷史會議欄；右：逐字稿 / 分析 / 記憶檢索。
 // 動作：分析（analyze）、存檔（加密落地 + 存入跨會議記憶）、載入歷史、新會議。
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { analyze, ingestMeeting, saveMeeting } from "../lib/api";
 import type {
   ActionItem,
@@ -97,7 +97,18 @@ export default function Workspace() {
   const [routerLang, setRouterLang] = useState<TranscribeLang>("auto");
   const [importError, setImportError] = useState<string | null>(null);
 
-  async function handleImportRecording() {
+  // 收音停止後自動精修一次（避免使用者忘了按鈕、以為「沒輸出逐字稿」）；
+  // 失敗緩衝會保留，故偶發網路抖動自動重試一次再放棄。
+  const autoFinalizedRef = useRef(false);
+  useEffect(() => {
+    if (recordingReady && !finalizing && !autoFinalizedRef.current) {
+      autoFinalizedRef.current = true;
+      void handleImportRecording();
+    }
+    if (!recordingReady) autoFinalizedRef.current = false; // 下一段收音可再自動精修
+  }, [recordingReady, finalizing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleImportRecording(isRetry = false) {
     setImportError(null);
     try {
       const clean = await finalizeRecording(routerLang);
@@ -106,6 +117,11 @@ export default function Workspace() {
         setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
       }
     } catch (e) {
+      if (!isRetry) {
+        // 偶發網路抖動（fetch failed）：緩衝仍在，等一下自動重試一次
+        await new Promise((r) => setTimeout(r, 1500));
+        return handleImportRecording(true);
+      }
       setImportError(e instanceof Error ? e.message : "精修失敗");
     }
   }
@@ -261,7 +277,8 @@ export default function Workspace() {
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-accent/40 bg-brand-accent/10 px-4 py-3">
             <span className="text-sm text-slate-100">
               📥 收音已結束{recordingSeconds > 0 ? `（約 ${recordingSeconds} 秒）` : ""}
-              {recordingTruncated ? "（超長，只精修前段）" : ""}— 整檔精修成乾淨稿帶入會議
+              {recordingTruncated ? "（超長，只精修前段）" : ""}—{" "}
+              {finalizing ? "正在自動精修成乾淨稿帶入會議…" : "已自動精修；如需可重做"}
             </span>
             <select
               value={routerLang}
@@ -275,11 +292,11 @@ export default function Workspace() {
               <option value="en">一律英文</option>
             </select>
             <button
-              onClick={handleImportRecording}
+              onClick={() => void handleImportRecording()}
               disabled={finalizing}
               className="rounded-md bg-brand-accent px-4 py-1.5 text-sm font-semibold text-brand-dark transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {finalizing ? "精修中…" : "✨ 精修並帶入會議"}
+              {finalizing ? "精修中…" : "✨ 重新精修並帶入會議"}
             </button>
             {importError && <span className="w-full text-xs text-brand-danger">{importError}</span>}
           </div>

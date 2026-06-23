@@ -389,17 +389,19 @@ export class GeminiLlmService implements LlmService {
     // 1) 開 resumable 上傳 session，從回應 header 取得上傳 URL
     let startResp: Response;
     try {
-      startResp = await fetch(`${GLA_HOST}/upload/v1beta/files?key=${this.apiKey}`, {
-        method: "POST",
-        headers: {
-          "X-Goog-Upload-Protocol": "resumable",
-          "X-Goog-Upload-Command": "start",
-          "X-Goog-Upload-Header-Content-Length": String(bytes.length),
-          "X-Goog-Upload-Header-Content-Type": mimeType,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ file: { display_name: "meeting-audio" } }),
-      });
+      startResp = await fetchWithNetRetry(() =>
+        fetch(`${GLA_HOST}/upload/v1beta/files?key=${this.apiKey}`, {
+          method: "POST",
+          headers: {
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": String(bytes.length),
+            "X-Goog-Upload-Header-Content-Type": mimeType,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ file: { display_name: "meeting-audio" } }),
+        }),
+      );
     } catch (e) {
       throw new AppError(
         ErrorCode.CLAUDE_API_ERROR,
@@ -414,16 +416,18 @@ export class GeminiLlmService implements LlmService {
       );
     }
 
-    // 2) 上傳位元組並 finalize
-    const upResp = await fetch(uploadUrl, {
-      method: "POST",
-      headers: {
-        "Content-Length": String(bytes.length),
-        "X-Goog-Upload-Offset": "0",
-        "X-Goog-Upload-Command": "upload, finalize",
-      },
-      body: bytes,
-    });
+    // 2) 上傳位元組並 finalize（偶發網路抖動自動重試，避免整段收音因一次 fetch failed 白收）
+    const upResp = await fetchWithNetRetry(() =>
+      fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Length": String(bytes.length),
+          "X-Goog-Upload-Offset": "0",
+          "X-Goog-Upload-Command": "upload, finalize",
+        },
+        body: bytes,
+      }),
+    );
     const upJson = (await upResp.json().catch(() => null)) as
       | { file?: { name?: string; uri?: string; state?: string } }
       | null;
@@ -643,6 +647,20 @@ function splitChatSuggestions(raw: string): { answer: string; suggestions: strin
     .filter((l) => l.length > 0)
     .slice(0, 3);
   return { answer, suggestions };
+}
+
+/** 對「會丟網路例外（fetch failed）」的原始 fetch 做幾次退避重試，吸收偶發網路抖動。 */
+async function fetchWithNetRetry(doFetch: () => Promise<Response>, tries = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await doFetch();
+    } catch (e) {
+      lastErr = e;
+      if (i < tries - 1) await sleep(800 * (i + 1));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 /**
