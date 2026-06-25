@@ -6,6 +6,34 @@
 
 ---
 
+## 2026-06-25 — 修「收音沒逐字稿」根因 + AI 建議模式/改名/Groq 後援/OTA 全套（v0.1.8 → 0.1.14）
+
+### ✅ 做了什麼（依版本）
+- **v0.1.8**：AI 助理＋記憶聊天「答完給後續建議鈕」（單次 `/chat` + `###建議###` 純文字標記切出建議，**刻意不用 responseSchema**，避開 Gemini thinking 模型的 RECITATION 空回應）；產品**改名 Leo work → 語音轉文字**（productName/視窗標題/標頭/hero/手機收音頁）；換 App 圖示為麥克風 logo（`src-tauri/app-icon.svg` → `tauri icon` 全套重產）。**保留 identifier `com.leowork.desktop`**，舊會議/加密 salt 不失。
+- **v0.1.9**：手機/電腦收音「停止後**自動整檔精修**帶入逐字稿」＋ Gemini 上傳偶發 `fetch failed` 自動重試。
+- **v0.1.10（最關鍵）**：打包版 webview CSP `connect-src` **漏 `ws://`** → `/events`、`/live` 兩條 WebSocket 被擋 → VU 不動、即時稿不出、`recording` 事件收不到（連 v0.1.9 自動精修都不觸發）。dev(`localhost:1420`)無 Tauri CSP 故測不出來。補 `ws://127.0.0.1:8765 ws://localhost:8765`。**這才是「收音沒逐字稿」真因。**
+- **v0.1.11**：Groq 當 Gemini 後援（`GroqLlmService` + `FallbackLlmService`）——分析/翻譯/聊天遇 Gemini 503 過載/429 限流自動轉 Groq；用庭晰專屬 Groq key。
+- **v0.1.12**：一批精修——① `lib.rs` `RunEvent::Exit` kill sidecar（根治 8765 殘留/檔鎖）② ffmpeg 收音卡死看門狗（4s 無 PCM 自動重啟，上限 2 次）③ Groq 進設定畫面 + `hasGroqKey` ④ 即時稿沒字給「預覽/停止後精修」提示 ⑤ 匯出 compose 也走 Groq 後援（`normalizeComposedDoc` 改 export 共用）⑦ 修模型 placeholder。（⑥⑧ 清桌面裸露金鑰 token.txt 與散落 config.json）
+- **v0.1.13**：OTA——repo **設 public**（庭晰手動於 GitHub Settings 改；token 無 Administration 權限）＋ CI 加 `updater-json` job 補產 `latest.json`（tauri-action 在 Win+Mac matrix 下不產統一 latest.json）。
+- **v0.1.14（已 commit、未發版）**：修 OTA 下載 404（`latest.json` 改用穩定網址 `.../download/<tag>/<name>`，不用草稿的 `untagged-xxx`）＋ 更新失敗顯示原因（不再「按了沒用」靜默）＋ **更新前自動 `/shutdown` sidecar 釋放檔鎖**（免再手動收 leo-node）。
+
+### 設計決策 / 踩過的坑（已寫進 skill 已知雷 #12–#14 + OTA 段）
+- 收音→逐字稿**兩條路**：即時 Gemini Live（盡力預覽、會靜默失敗）vs 停止後整檔精修（可靠、gemini-2.5-flash）。後者才是存檔版。
+- OTA：① latest.json url 必用穩定網址，mac 的 `_aarch64.app.tar.gz` **無版號前綴**；② OTA 安裝卡 lancedb 檔鎖 → 更新前關 sidecar（修正須在「正在跑的版本」才生效）；③ repo public 後 token 選取改靠「**能看到草稿**」（fine-grained PAT 的 `.permissions.push` 回擁有者權限、不可靠）；④ **`gh api` 後別接 `2>$null`**（PowerShell 把 native stderr 包成 ErrorRecord 汙染 stdout，害 ConvertFrom-Json 變 1 筆、誤判限流）。
+
+### 驗證結果
+- 每版 typecheck（兩 tsconfig exit 0）＋ vitest **98/98** ＋ vite build OK；Rust(`lib.rs`)靠 CI 編譯通過（Win+Mac 安裝檔都出 = 編過）。
+- OTA 端到端實機驗：偵測 ✅、下載 ✅（curl 匿名 exe HTTP 200）、驗章 ✅、跑安裝 ✅，只差最後檔鎖（v0.1.14 已修）。
+- Groq 專屬 key 實測可用。
+
+### 現況 / 待辦
+- **庭晰目前在 v0.1.12**：功能完整、9 項精修全在。中止了 v0.1.13 的 OTA 安裝，**無損失**（v0.1.13 與 v0.1.12 功能相同、僅版號差）。
+- **v0.1.14 已 commit 未發版**：下次有實際新功能要發版時一起帶。**升到 v0.1.14 的那一次 OTA 仍需手動「重試」一次**（自動關 sidecar 要在執行中的版本才生效），之後才完全免手動。
+- repo 已 public、OTA 機制就緒。金鑰：Gemini + Groq 都在 Roaming `config.json` + `.env` + `金鑰.txt`（`LEO_WORK_GROQ_API_KEY`）。
+- 最新 commit：`ffaa16b`。
+
+---
+
 ## 2026-06-21 — 排查「桌面與網站都連不上」：實為 dev server 沒啟動（非崩潰）
 
 ### ✅ 結果（全部完成 2026-06-22）
