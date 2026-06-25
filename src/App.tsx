@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { health } from "./lib/api";
+import { health, shutdownSidecar } from "./lib/api";
 import { checkForUpdate, installUpdateAndRelaunch } from "./lib/updater";
 import Workspace from "./components/Workspace";
 import { RouterBar, RouterDetails } from "./components/RouterPanel";
@@ -43,6 +43,9 @@ export default function App() {
     setUpdating(true);
     setUpdateError(null);
     try {
+      // 先關掉 sidecar 釋放檔案鎖，NSIS 安裝才不會卡 lancedb .node（見 server.ts /shutdown）。
+      await shutdownSidecar();
+      await new Promise((r) => setTimeout(r, 600));
       await installUpdateAndRelaunch(update);
     } catch (e) {
       console.warn("更新失敗", e);

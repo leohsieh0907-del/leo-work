@@ -148,3 +148,12 @@ export async function getConfig(): Promise<ConfigStatus> {
 export function saveConfig(update: ConfigUpdate): Promise<{ ok: true; restartRequired: boolean }> {
   return post("/config", update);
 }
+
+/** OTA 更新前關掉 sidecar，釋放檔案鎖（best-effort，失敗忽略）。 */
+export async function shutdownSidecar(): Promise<void> {
+  try {
+    await fetch(`${BASE}/shutdown`, { method: "POST" });
+  } catch {
+    /* sidecar 可能已關，忽略 */
+  }
+}

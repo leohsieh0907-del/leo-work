@@ -256,6 +256,13 @@ app.get("/config", (_req, res) => {
   res.json(getRuntimeConfigStatus());
 });
 
+// OTA 更新前由前端呼叫：自己關掉 sidecar，釋放 sidecar 資料夾的檔案鎖（lancedb .node 等），
+// 否則 NSIS 安裝器覆寫不過去（Error opening file for writing）。更新後 Tauri 重啟會重新 spawn。
+app.post("/shutdown", (_req, res) => {
+  res.json({ ok: true });
+  setTimeout(() => process.exit(0), 150);
+});
+
 app.post(
   "/config",
   wrap(async (req, res) => {
