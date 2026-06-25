@@ -83,6 +83,7 @@ export default function App() {
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-brand-accent text-lg">◆</span>
           <h1 className="text-base font-semibold tracking-wide">語音轉文字</h1>
+          <span className="text-[11px] font-medium text-slate-500">v{__APP_VERSION__}</span>
           <span className="ml-1 hidden rounded bg-white/5 px-2 py-0.5 text-xs text-slate-400 xl:inline">
             本地隱私 · 跨會議記憶
           </span>
