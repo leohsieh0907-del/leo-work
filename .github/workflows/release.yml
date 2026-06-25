@@ -48,6 +48,49 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Leo work ${{ github.ref_name }}"
+          releaseName: "語音轉文字 ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
+
+  # tauri-action 在 Win+Mac matrix 下不會產出統一的 latest.json（各 job 互相蓋掉）→
+  # 自動更新器抓不到清單。這個 job 在 matrix 跑完後，從 release 的 .sig 與安裝檔組出
+  # latest.json 再上傳。純附加：build job 不受影響，失敗也不影響安裝檔產出。
+  updater-json:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 合成並上傳 latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VER="${TAG#v}"
+          RID=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -n1)
+          echo "release id: $RID  version: $VER"
+          ASSETS=$(gh api "repos/$REPO/releases/$RID/assets?per_page=100")
+          url_of()   { echo "$ASSETS" | jq -r --arg s "$1" '.[] | select(.name|endswith($s)) | .browser_download_url' | head -n1; }
+          sigid_of() { echo "$ASSETS" | jq -r --arg s "$1" '.[] | select(.name|endswith($s)) | .id' | head -n1; }
+          fetch_sig(){ gh api "repos/$REPO/releases/assets/$(sigid_of "$1")" -H "Accept: application/octet-stream"; }
+
+          WIN_URL=$(url_of "x64-setup.exe");        WIN_SIG=$(fetch_sig "x64-setup.exe.sig")
+          MAC_URL=$(url_of "aarch64.app.tar.gz");   MAC_SIG=$(fetch_sig "aarch64.app.tar.gz.sig")
+          test -n "$WIN_URL" && test -n "$WIN_SIG" || { echo "缺 Windows 產物，中止"; exit 1; }
+
+          jq -n --arg ver "$VER" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg wurl "$WIN_URL" --arg wsig "$WIN_SIG" \
+                --arg murl "$MAC_URL" --arg msig "$MAC_SIG" '
+            {
+              version: $ver,
+              notes: "語音轉文字更新",
+              pub_date: $date,
+              platforms: (
+                (if $wurl != "" then {"windows-x86_64": {signature: $wsig, url: $wurl}} else {} end)
+                + (if $murl != "" then {"darwin-aarch64": {signature: $msig, url: $murl}} else {} end)
+              )
+            }' > latest.json
+          echo "--- latest.json ---"; cat latest.json
+          gh release upload "$TAG" latest.json --repo "$REPO" --clobber
