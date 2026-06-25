@@ -15,6 +15,7 @@ export default function App() {
   const [view, setView] = useState<"workspace" | "memory">("workspace");
   const [update, setUpdate] = useState<Update | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
   // 啟動時輪詢 sidecar 是否就緒（Node 服務啟動需一點時間）
@@ -40,10 +41,12 @@ export default function App() {
   async function applyUpdate() {
     if (!update) return;
     setUpdating(true);
+    setUpdateError(null);
     try {
       await installUpdateAndRelaunch(update);
     } catch (e) {
       console.warn("更新失敗", e);
+      setUpdateError(e instanceof Error ? e.message : "更新失敗，請稍後再試");
       setUpdating(false);
     }
   }
@@ -52,7 +55,10 @@ export default function App() {
     <div className="flex h-full flex-col">
       {update && (
         <div className="flex items-center gap-3 border-b border-amber-400/30 bg-amber-500/10 px-5 py-2 text-sm">
-          <span>✨ 有新版 <b>v{update.version}</b> 可更新</span>
+          <span>
+            ✨ 有新版 <b>v{update.version}</b> 可更新
+            {updateError && <span className="text-brand-danger"> — ⚠️ {updateError}</span>}
+          </span>
           <button
             onClick={applyUpdate}
             disabled={updating}

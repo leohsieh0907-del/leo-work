@@ -72,7 +72,10 @@ jobs:
           RID=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -n1)
           echo "release id: $RID  version: $VER"
           ASSETS=$(gh api "repos/$REPO/releases/$RID/assets?per_page=100")
-          url_of()   { echo "$ASSETS" | jq -r --arg s "$1" '.[] | select(.name|endswith($s)) | .browser_download_url' | head -n1; }
+          # 用「穩定下載網址」.../download/<tag>/<name>，不要用 browser_download_url——
+          # 草稿期它是臨時的 .../download/untagged-xxxx/...，發佈後失效(404)→OTA 下載掛掉。
+          name_of()  { echo "$ASSETS" | jq -r --arg s "$1" '.[] | select(.name|endswith($s)) | .name' | head -n1; }
+          url_of()   { local n; n=$(name_of "$1"); [ -n "$n" ] && echo "https://github.com/$REPO/releases/download/$TAG/$n"; }
           sigid_of() { echo "$ASSETS" | jq -r --arg s "$1" '.[] | select(.name|endswith($s)) | .id' | head -n1; }
           fetch_sig(){ gh api "repos/$REPO/releases/assets/$(sigid_of "$1")" -H "Accept: application/octet-stream"; }
 
