@@ -119,8 +119,7 @@ export function RouterDetails() {
     };
   }, [phoneActive]);
 
-  const liveTranscript = realtimeActive && transcript;
-  const hasContent = phoneActive || status?.bluetooth.transferring || liveTranscript || error;
+  const hasContent = phoneActive || status?.bluetooth.transferring || realtimeActive || error;
   if (!hasContent) return null;
 
   return (
@@ -180,10 +179,19 @@ export function RouterDetails() {
         </div>
       )}
 
-      {/* 即時逐字稿（手機收音、電腦即時看）*/}
-      {liveTranscript && (
+      {/* 即時逐字稿（手機收音、電腦即時看）。即時稿只是預覽、且 Gemini Live 偶有延遲/不穩，
+          沒字時給提示，避免使用者以為壞了——可靠逐字稿來自「停止」後的整檔精修。*/}
+      {realtimeActive && (
         <div className="max-h-20 overflow-y-auto rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
-          <span className="text-slate-500">即時逐字稿：</span> {transcript}
+          {transcript ? (
+            <>
+              <span className="text-slate-500">即時逐字稿：</span> {transcript}
+            </>
+          ) : (
+            <span className="text-slate-500">
+              即時稿準備中…（即時稿僅為預覽；最終逐字稿以「停止」後的整檔精修為準）
+            </span>
+          )}
         </div>
       )}
 

@@ -577,8 +577,8 @@ export class GeminiLlmService implements LlmService {
   }
 }
 
-/** 防呆解析 Gemini 回的 ComposedDoc：濾掉空/壞區塊，欄位型別歸一。 */
-function normalizeComposedDoc(obj: Record<string, unknown>, fallbackTitle: string): ComposedDoc {
+/** 防呆解析 LLM 回的 ComposedDoc：濾掉空/壞區塊，欄位型別歸一。（Gemini/Groq 共用） */
+export function normalizeComposedDoc(obj: Record<string, unknown>, fallbackTitle: string): ComposedDoc {
   const rawBlocks = Array.isArray(obj.blocks) ? obj.blocks : [];
   const blocks: DocBlock[] = [];
   for (const b of rawBlocks) {

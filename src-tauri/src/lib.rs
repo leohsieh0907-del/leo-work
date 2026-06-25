@@ -5,10 +5,14 @@
 //! - 正式版：sidecar 以 `assemble:sidecar` 打包成 resources(`sidecar/`) + Node runtime
 //!   externalBin(`binaries/leo-node`)，於 setup 階段 spawn（見 `spawn_sidecar`）。
 //!
-//! ⚠️ 尚待 CI 迭代收尾（里程碑 2/3）：
-//!   - 結束時關閉 sidecar（否則 127.0.0.1:8765 殘留，下次啟動綁不到）。
-//!   - 正式版執行期密鑰（ENCRYPTION_SALT / GEMINI_API_KEY）來源——不能靠 .env，
-//!     需改由 app 設定檔 / 首次啟動設定畫面注入（這裡先只帶 SIDECAR_PORT）。
+//! App 結束時會 kill 掉 spawn 的 sidecar（`RunEvent::Exit`，正常關閉路徑），避免 8765 殘留／
+//! 舊 sidecar 續跑舊碼／裝新版時 lancedb 檔被鎖。（force-kill 不經 Exit，屬另案。）
+//! 正式版執行期密鑰（ENCRYPTION_SALT / GEMINI_API_KEY / GROQ_API_KEY）由 app 設定檔 config.json
+//! 注入（AppConfig，非 .env）；這裡只帶 SIDECAR_PORT 與 LEO_DATA_DIR。
+
+/// 持有 spawn 出的 sidecar `Child`，供 App 結束時 kill（只在正式版存在）。
+#[cfg(not(debug_assertions))]
+struct SidecarGuard(std::sync::Mutex<Option<std::process::Child>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,16 +29,35 @@ pub fn run() {
         .setup(|_app| {
             // 正式版才 spawn 打包的 sidecar；dev 由 npm run dev 啟動。
             #[cfg(not(debug_assertions))]
-            spawn_sidecar(_app)?;
+            {
+                use tauri::Manager;
+                let child = spawn_sidecar(_app)?;
+                // 存著 Child handle，App 結束時 kill（見下方 RunEvent::Exit）。
+                _app.manage(SidecarGuard(std::sync::Mutex::new(Some(child))));
+            }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("執行 Tauri 應用程式時發生錯誤");
+        .build(tauri::generate_context!())
+        .expect("執行 Tauri 應用程式時發生錯誤")
+        .run(|_app_handle, _event| {
+            // App 真正結束時，收掉 spawn 的 sidecar（正常關閉路徑）。
+            #[cfg(not(debug_assertions))]
+            if let tauri::RunEvent::Exit = _event {
+                use tauri::Manager;
+                if let Some(guard) = _app_handle.try_state::<SidecarGuard>() {
+                    if let Ok(mut lock) = guard.0.lock() {
+                        if let Some(mut child) = lock.take() {
+                            let _ = child.kill();
+                        }
+                    }
+                }
+            }
+        });
 }
 
 /// 啟動打包進 resources 的 Node sidecar（leo-node externalBin + sidecar/server.cjs）。
 #[cfg(not(debug_assertions))]
-fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+fn spawn_sidecar(app: &tauri::App) -> Result<std::process::Child, Box<dyn std::error::Error>> {
     use tauri::Manager;
 
     let exe = std::env::current_exe()?;
@@ -80,7 +103,7 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let server_dir_str = server_dir.to_string_lossy();
     let server_dir_clean: &str = server_dir_str.strip_prefix(r"\\?\").unwrap_or(&server_dir_str);
 
-    std::process::Command::new(&node)
+    let child = std::process::Command::new(&node)
         .current_dir(server_dir_clean)
         .arg("server.cjs")
         .env("SIDECAR_PORT", "8765")
@@ -90,5 +113,5 @@ fn spawn_sidecar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .stderr(std::process::Stdio::from(log_err))
         .spawn()?;
 
-    Ok(())
+    Ok(child)
 }

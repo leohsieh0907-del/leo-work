@@ -233,6 +233,7 @@ export interface ApiErrorBody {
 /** 設定狀態（GET /config；只回布林/非機密，不外洩金鑰值）。 */
 export interface ConfigStatus {
   hasGeminiKey: boolean;
+  hasGroqKey: boolean;
   llmProvider: string;
   geminiModel?: string;
 }
@@ -240,6 +241,7 @@ export interface ConfigStatus {
 /** 設定更新（POST /config）。空字串＝清除該設定。 */
 export interface ConfigUpdate {
   geminiApiKey?: string;
+  groqApiKey?: string;
   llmProvider?: string;
   geminiModel?: string;
 }

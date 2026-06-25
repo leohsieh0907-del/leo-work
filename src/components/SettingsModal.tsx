@@ -7,6 +7,7 @@ import { relaunchApp } from "../lib/updater";
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<ConfigStatus | null>(null);
   const [geminiKey, setGeminiKey] = useState("");
+  const [groqKey, setGroqKey] = useState("");
   const [provider, setProvider] = useState("ollama");
   const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
@@ -27,14 +28,21 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      const update: { geminiApiKey?: string; llmProvider?: string; geminiModel?: string } = {
+      const update: {
+        geminiApiKey?: string;
+        groqApiKey?: string;
+        llmProvider?: string;
+        geminiModel?: string;
+      } = {
         llmProvider: provider,
         geminiModel: model,
       };
       if (geminiKey.trim()) update.geminiApiKey = geminiKey.trim(); // 留空＝不變更既有金鑰
+      if (groqKey.trim()) update.groqApiKey = groqKey.trim();
       const r = await saveConfig(update);
       setSavedNeedRestart(r.restartRequired);
       setGeminiKey("");
+      setGroqKey("");
       setStatus(await getConfig());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -85,6 +93,23 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           錄音轉錄 / AI 助理 / 即時逐字稿需要；到 Google AI Studio 免費申請。
         </p>
 
+        <label className="mb-1 block text-sm text-slate-300">
+          Groq API 金鑰（後援）
+          {status?.hasGroqKey && (
+            <span className="ml-2 text-xs text-emerald-400">✅ 已設定（留空＝不變更）</span>
+          )}
+        </label>
+        <input
+          type="password"
+          value={groqKey}
+          onChange={(e) => setGroqKey(e.target.value)}
+          placeholder={status?.hasGroqKey ? "••••••（已設定）" : "貼上 gsk_... 金鑰"}
+          className={`mb-1 ${inputCls}`}
+        />
+        <p className="mb-4 text-xs text-slate-500">
+          Gemini 過載/限流時，分析・翻譯・聊天自動改用 Groq 接手；到 console.groq.com 免費申請。
+        </p>
+
         <label className="mb-1 block text-sm text-slate-300">LLM 來源（分析 / 翻譯）</label>
         <select
           value={provider}
@@ -100,7 +125,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         <input
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          placeholder="gemini-3.5-flash"
+          placeholder="gemini-2.5-flash"
           className={`mb-4 ${inputCls}`}
         />
 

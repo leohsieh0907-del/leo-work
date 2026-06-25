@@ -133,8 +133,8 @@ const groq = process.env.GROQ_API_KEY
 if (groq && llm instanceof GeminiLlmService) {
   llm = new FallbackLlmService(llm, groq);
 }
-// 聊天：geminiStt 為主、groq 為援（無 groq 則退回純 geminiStt）。
-const chatLlm = geminiStt && groq ? new FallbackLlmService(geminiStt, groq) : geminiStt;
+// 文字 AI（聊天 + 客製匯出）：geminiStt 為主、groq 為援（無 groq 則退回純 geminiStt）。
+const textAi = geminiStt && groq ? new FallbackLlmService(geminiStt, groq) : geminiStt;
 
 // ─────────────── 雙源收音引擎 ───────────────
 
@@ -259,9 +259,10 @@ app.get("/config", (_req, res) => {
 app.post(
   "/config",
   wrap(async (req, res) => {
-    const { geminiApiKey, llmProvider, geminiModel } = req.body as ConfigUpdate;
+    const { geminiApiKey, groqApiKey, llmProvider, geminiModel } = req.body as ConfigUpdate;
     const patch: Record<string, string | undefined> = {};
     if (geminiApiKey !== undefined) patch.GEMINI_API_KEY = geminiApiKey.trim();
+    if (groqApiKey !== undefined) patch.GROQ_API_KEY = groqApiKey.trim();
     if (llmProvider !== undefined) patch.LLM_PROVIDER = llmProvider;
     if (geminiModel !== undefined) patch.GEMINI_MODEL = geminiModel.trim();
     updateRuntimeConfig(patch);
@@ -385,11 +386,11 @@ app.post(
       history?: ChatTurn[];
     };
     if (!question) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 question");
-    if (!chatLlm) {
+    if (!textAi) {
       throw new AppError(ErrorCode.CONFIG_MISSING, "AI 助理需要 GEMINI_API_KEY，請於 .env 設定");
     }
     const memory = await vectorStore.queryHistoricalContext(question, 3).catch(() => "");
-    const result = await chatLlm.chat(question, transcript ?? "", memory, history ?? []);
+    const result = await textAi.chat(question, transcript ?? "", memory, history ?? []);
     res.json(result); // { answer, suggestions }
   }),
 );
@@ -406,10 +407,10 @@ app.post(
     if (body.format !== "docx" && body.format !== "xlsx" && body.format !== "pptx") {
       throw new AppError(ErrorCode.INVALID_INPUT, "format 必須是 docx / xlsx / pptx");
     }
-    if (!geminiStt) {
+    if (!textAi) {
       throw new AppError(ErrorCode.CONFIG_MISSING, "AI 客製匯出需要 GEMINI_API_KEY，請於 .env 設定");
     }
-    const doc = await geminiStt.composeExportDoc(body);
+    const doc = await textAi.composeExportDoc(body);
     res.json({ doc } satisfies ComposeExportResponse);
   }),
 );

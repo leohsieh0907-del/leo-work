@@ -71,6 +71,10 @@ export class SystemAudioCapture implements CaptureSource {
   private stderrBuf = "";
   /** 是否已主動 stop（避免 stop 觸發的 error 被誤報給上層）。 */
   private stopping = false;
+  /** 看門狗：啟動後若遲遲收不到 PCM（ffmpeg 偶發卡死）就自動重啟。 */
+  private watchdog: ReturnType<typeof setTimeout> | null = null;
+  /** 自動重啟次數（上限保護，避免無限重啟）。 */
+  private restartCount = 0;
 
   constructor(opts: SystemCaptureOptions = {}) {
     this.micDevice = opts.micDevice;
@@ -117,6 +121,15 @@ export class SystemAudioCapture implements CaptureSource {
    * stdout 的 s16le 流切成 AudioChunk 餵給 onChunk。
    */
   async start(
+    onChunk: (chunk: AudioChunk) => void,
+    onError: (err: Error) => void,
+  ): Promise<void> {
+    this.restartCount = 0; // 外部呼叫＝全新 session，重置自動重啟計數
+    return this.launch(onChunk, onError);
+  }
+
+  /** 實際啟動 ffmpeg 並掛看門狗；若卡死，由看門狗再次呼叫自己重啟（restartCount 不重置）。 */
+  private async launch(
     onChunk: (chunk: AudioChunk) => void,
     onError: (err: Error) => void,
   ): Promise<void> {
@@ -168,12 +181,31 @@ export class SystemAudioCapture implements CaptureSource {
     this.proc = proc;
 
     proc.stdout.on("data", (data: Buffer) => {
+      if (this.watchdog !== null) {
+        this.clearWatchdog(); // 收到 PCM＝沒卡死
+        this.restartCount = 0; // 健康運作，重置重啟計數
+      }
       try {
         this.handlePcm(data, onChunk);
       } catch (err) {
         onError(err instanceof Error ? err : new Error(String(err)));
       }
     });
+
+    // 看門狗：啟動後 4 秒內收不到任何 PCM＝ffmpeg 卡死（known雷 #13），自動重啟一次（上限 2 次）。
+    // 注意：靜音時 ffmpeg 仍持續吐 PCM（零值），故「完全無資料」才判定卡死，不會誤殺正常的安靜片段。
+    this.clearWatchdog();
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      if (this.stopping || this.proc !== proc) return; // 已停 / 已換新 proc
+      if (this.restartCount >= 2) {
+        onError(new AppError(ErrorCode.IO_ERROR, "收音啟動後持續無訊號，請按停止再重試一次"));
+        return;
+      }
+      this.restartCount++;
+      console.warn(`[SystemAudioCapture] 4s 無 PCM，疑似卡死，自動重啟收音（第 ${this.restartCount} 次）`);
+      void this.launch(onChunk, onError);
+    }, 4000);
 
     proc.stderr.on("data", (data: Buffer) => {
       // 累積診斷訊息（FFmpeg 把進度與錯誤都印在 stderr），上限避免無限增長
@@ -206,8 +238,17 @@ export class SystemAudioCapture implements CaptureSource {
    * 停止收音：kill ffmpeg 子行程並清空緩衝。
    * 可重複呼叫不報錯（無進行中行程時直接返回）。
    */
+  /** 清掉看門狗計時器（若有）。 */
+  private clearWatchdog(): void {
+    if (this.watchdog !== null) {
+      clearTimeout(this.watchdog);
+      this.watchdog = null;
+    }
+  }
+
   async stop(): Promise<void> {
     this.stopping = true;
+    this.clearWatchdog();
     const proc = this.proc;
     this.proc = null;
     this.residual = Buffer.alloc(0);

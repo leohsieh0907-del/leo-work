@@ -16,8 +16,11 @@ import {
   type ProactiveAnalysis,
   type ActionItem,
   type ChatTurn,
+  type ComposeExportRequest,
+  type ComposedDoc,
 } from "../shared/types";
 import type { LlmService } from "./llm/types";
+import { normalizeComposedDoc } from "./GeminiLlmService";
 
 export interface GroqLlmOptions {
   apiKey: string;
@@ -228,6 +231,57 @@ export class GroqLlmService implements LlmService {
     const raw = await this.complete(messages, false);
     const parsed = splitChatSuggestions(raw);
     return parsed.answer ? parsed : { answer: "（沒有產生回覆，請換個方式問問看）", suggestions: [] };
+  }
+
+  /** AI 客製匯出（與 GeminiLlmService.composeExportDoc 同行為；共用 normalizeComposedDoc 解析）。 */
+  async composeExportDoc(req: ComposeExportRequest): Promise<ComposedDoc> {
+    const a = req.analysis;
+    const fmtName =
+      req.format === "docx" ? "Word 文件" : req.format === "xlsx" ? "Excel 試算表" : "PowerPoint 簡報";
+    const fmtRule =
+      req.format === "xlsx"
+        ? "這是 Excel：盡量用 table 區塊承載結構化資料（每個 table 變一張工作表），少用長段落。"
+        : req.format === "pptx"
+          ? "這是 PPT 簡報：精簡。heading 當投影片標題、bullets 當要點、文字短；**數字一律放 table（第一欄＝項目，其餘欄＝純數值）**，系統會自動畫圖。"
+          : "這是 Word 文件：可用 heading 分節、paragraph 敘述、bullets 列點、table 放結構化資料。";
+    const system =
+      `你是專業的會議文件製作助理，把會議資料整理成一份「${fmtName}」的內容。全程繁體中文，只輸出 JSON。\n` +
+      "嚴格遵守使用者指示；只能依據提供的會議資料，不可虛構事實或捏造數字；要求新增但資料沒有的欄位留空或標『未提供』。\n" +
+      fmtRule + "\n" +
+      "輸出一個 JSON 物件 { title: string, blocks: Block[] }。Block 依 type 填欄位：\n" +
+      'heading/paragraph→{type,text}；bullets→{type:"bullets",items:string[]}；' +
+      'table→{type:"table",columns:string[],rows:string[][]}；' +
+      'chart→{type:"chart",chartType:"bar"|"line"|"pie",categories:string[],series:[{name:string,values:number[]}]}。';
+
+    const source = [
+      `會議名稱：${req.title}`,
+      `日期：${req.date}`,
+      `會議主題：${a?.theme || "（無）"}`,
+      `關鍵摘要：\n${(a?.key_summary ?? []).map((s) => "- " + s).join("\n") || "（無）"}`,
+      `歷史衝突：\n${(a?.historical_conflicts ?? []).map((s) => "- " + s).join("\n") || "（無）"}`,
+      `行動方針：\n${
+        (req.actionItems ?? []).map((it) => `- ${it.task}｜負責人：${it.assignee}｜截止：${it.deadline}`).join("\n") ||
+        "（無）"
+      }`,
+      req.transcript?.trim() ? `逐字稿（節錄）：\n${req.transcript.slice(0, 8000)}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const discussion = (req.history ?? [])
+      .filter((h) => h.text?.trim())
+      .map((h) => `${h.role === "assistant" ? "AI" : "我"}：${h.text.trim()}`)
+      .join("\n");
+    const directive = req.instruction.trim() || "請依我們的討論整理出這份文件的內容。";
+    const user =
+      `=== 使用者指示 ===\n${directive}\n\n` +
+      (discussion ? `=== 我與 AI 的討論（衝突時以討論為準）===\n${discussion}\n\n` : "") +
+      `=== 會議資料 ===\n${source}`;
+
+    const raw = await this.complete([
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ], true);
+    return normalizeComposedDoc(safeJsonObject(raw), req.title);
   }
 }
 

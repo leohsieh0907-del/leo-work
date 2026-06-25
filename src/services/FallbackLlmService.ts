@@ -3,7 +3,13 @@
 // 就自動改打後援（Groq，快、額度大）。後援也失敗才把錯誤往上拋。
 // 涵蓋：分析 / 行動方針 / 翻譯 / 合併分析 / 聊天。（整檔精修與 Live 為 Gemini 專屬，不在此。）
 
-import type { ProactiveAnalysis, ActionItem, ChatTurn } from "../shared/types";
+import type {
+  ProactiveAnalysis,
+  ActionItem,
+  ChatTurn,
+  ComposeExportRequest,
+  ComposedDoc,
+} from "../shared/types";
 import type { LlmService } from "./llm/types";
 
 /** 主力/後援都需提供的文字能力（GeminiLlmService 與 GroqLlmService 皆滿足）。 */
@@ -18,6 +24,7 @@ export interface FallbackableLlm extends LlmService {
     memoryContext: string,
     history: ChatTurn[],
   ): Promise<{ answer: string; suggestions: string[] }>;
+  composeExportDoc(req: ComposeExportRequest): Promise<ComposedDoc>;
 }
 
 export class FallbackLlmService implements LlmService {
@@ -68,5 +75,9 @@ export class FallbackLlmService implements LlmService {
     history: ChatTurn[],
   ): Promise<{ answer: string; suggestions: string[] }> {
     return this.run("chat", (s) => s.chat(question, currentTranscript, memoryContext, history));
+  }
+
+  composeExportDoc(req: ComposeExportRequest): Promise<ComposedDoc> {
+    return this.run("composeExportDoc", (s) => s.composeExportDoc(req));
   }
 }
