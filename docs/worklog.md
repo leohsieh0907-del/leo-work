@@ -6,6 +6,38 @@
 
 ---
 
+## 2026-06-27 — 發 v0.1.14 + v0.1.15（版本顯示／亮暗主題／改名／CSV／匯入音檔／錄音回原場／發言人改名）
+
+### ✅ 做了什麼（依版本）
+- **v0.1.14 發版**：header 加版本號顯示 `v{__APP_VERSION__}`（Vite `define` 從 package.json 注入，單一來源；`tsconfig.node.json` 補 `resolveJsonModule`）。連同先前已 commit 的 OTA 修正（穩定網址、更新前自動關 sidecar）一起上線。OTA v0.1.13→v0.1.14 仍卡 lancedb 檔鎖（符合預期：自動關 sidecar 要在「執行中的版本」才生效）→ 手動結束 `leo-node` PID + 按「重試」即過。
+- **v0.1.15（一次發 6 功能＋1 調整）**：
+  1. **亮/暗主題切換**：配色全語意化（`index.css` 定義 `--bg/--panel/--inset/--fg(.muted/.subtle/.faint)/--line/--hover(.weak)`，`:root` 暗、`[data-theme=light]` 亮）；`tailwind.config.js` 把 `brand-dark/panel` 改綁 CSS 變數＋新增語意色；全 12 元件用 sed 把寫死的 `text-slate-*/border-white/bg-black|white/*` 換成語意 class（彩色按鈕白字、modal `bg-black/60` 遮罩、`brand-accent/danger/warn` 強調色刻意保留）；`App.tsx` header ☀️/🌙 鈕＋`src/lib/theme.ts`（localStorage）＋`index.html` 開機前先套主題防閃白。亮底用柔和 `#eef2f7` 非純白。
+  2. **會議改名**：解耦「穩定 id」與「顯示名 title」。`MeetingStore.rename(id,title)`（只改 title、id/檔名/向量記憶不動、不產生重複檔）＋ `PATCH /meetings/:id` ＋ `api.renameMeeting` ＋ 歷史欄每筆 hover ✎ 改名。**新會議內部 id 改用「秒＋亂數」（`newMeetingId`）**，避免同分鐘連開兩場各自存檔撞 id 互蓋（改名不再換 id 後浮現的風險）。
+  3. **CSV 匯出**：`exporters.exportCsv`（ComposedDoc 攤平、含 UTF-8 BOM，Excel 中文不亂碼，本機零 API）＋ ChatAssistant 匯出列加 📑 CSV。
+  4. **匯入音檔**：TranscriptPanel 📁 匯入鈕（`<input type=file accept=audio/*>` → base64 → `/transcribe`）。
+  5. **防資料遺失（選 B：錄音中可看別場、資料自動回原場）**：`recordingOriginRef` 在收音/錄音/匯入「開始」時快照原場會議；`routeRecordedText` 把停止後逐字稿寫回原場（切走了就 `persistMeeting` 直接存回 + 提示，不污染目前畫面），沒切走才併入目前。`confirmSwitch` 改成錄音中允許切換（離開原場前更新快照），非錄音有未存才確認。
+  6. **發言人改名**：整份字串替換 ＋ `speakerMapRef` 同場後續新轉錄（錄音/匯入）自動套用；換場重置、但錄音中切走時保留（讓寫回原場的那段也套用），寫回後清。
+  7. **AI 助理收合不卸載**：原本收合是條件渲染整個卸載 → 對話被清空。改成永遠掛載、`collapsed` prop 只切顯示 → 收起/展開/放大都不再清空對話。
+  - 關閉 webview 預設右鍵選單（`main.tsx` `contextmenu` preventDefault，輸入框/textarea/contenteditable 保留貼上）。
+
+### 設計決策 / 踩過的坑
+- **錄音回原場最關鍵 bug**：`capturing`（含 `finalizing`）會在「router 停止→精修」造成**第二次快照上升緣**，把原場快照重抓成（可能已切走的）目前會議 → 寫錯場（正是要修的症狀）。解法＝另用 `captureActive`（**不含 finalizing**）只抓「收音開始」那次上升緣。
+- 發言人改名是「名稱對應」非聲紋：靠 Gemini 仍標「發言人N」再替換；它哪次標成別號就要再補一條。字串替換為子字串比對（`發言人1` 會誤匹配 `發言人10` 內，會議實務 ≤9 人影響極小）。
+- 配色重構零改背景靠「`brand-dark/panel` 綁變數」；文字/邊框/浮層才需逐處換語意 class。
+
+### 驗證結果
+- 每批 typecheck（兩 tsconfig exit 0）＋ vite build ＋ vitest **98/98** 全綠。
+- `/code-review`（medium）跑兩批，揪出並修：① 同分鐘撞 id 互蓋 ② finalizing 二次快照寫錯場。
+- 庭晰在 dev（`localhost:1420`）實測通過（錄音回原場、發言人改名、收合不清空）才發版。
+- v0.1.15 已發佈上線，OTA `latest.json` 匿名驗 = 0.1.15 + 穩定網址。
+
+### 現況 / 待辦
+- **線上最新 = v0.1.15**（已發佈、latest）。庭晰裝的 v0.1.14 開啟會自動跳更新，這次起 OTA 不再卡檔鎖。
+- **手機獨立版（未開工，已討論架構）**：需求＝不開電腦也能用手機錄音→轉錄→分析→存手機→匯出回電腦。結論＝獨立 **Vercel PWA**（client-side 直打 Gemini，手機自帶 key、需網路）＋桌面加「匯入」；與桌面版是兩個東西。待庭晰要做時開規劃。
+- 最新 commit：`73e014c`。
+
+---
+
 ## 2026-06-25 — 修「收音沒逐字稿」根因 + AI 建議模式/改名/Groq 後援/OTA 全套（v0.1.8 → 0.1.14）
 
 ### ✅ 做了什麼（依版本）
