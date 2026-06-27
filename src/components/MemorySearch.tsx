@@ -36,8 +36,8 @@ export default function MemorySearch() {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">跨會議記憶檢索</h2>
-        <span className="text-xs text-slate-500">問過去會議的問題</span>
+        <h2 className="text-sm font-semibold text-fg">跨會議記憶檢索</h2>
+        <span className="text-xs text-fg-faint">問過去會議的問題</span>
       </div>
 
       <div className="flex items-center gap-2">
@@ -47,7 +47,7 @@ export default function MemorySearch() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="例：上週與 A 客戶開會提到的預算上限是多少？"
-          className="flex-1 rounded-md border border-white/10 bg-brand-dark/60 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand"
+          className="flex-1 rounded-md border border-line bg-brand-dark/60 px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-faint focus:border-brand"
         />
         <button
           onClick={handleSearch}
@@ -61,14 +61,14 @@ export default function MemorySearch() {
       {error && <p className="text-xs text-brand-danger">{error}</p>}
 
       {context !== null && (
-        <div className="rounded-lg border border-white/10 bg-brand-panel p-3">
+        <div className="rounded-lg border border-line bg-brand-panel p-3">
           <div className="mb-2 text-xs font-semibold text-brand-accent">檢索到的歷史背景</div>
           {context.trim() ? (
-            <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-slate-100">
+            <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-fg">
               {context}
             </pre>
           ) : (
-            <p className="text-sm text-slate-500">沒有找到相關的歷史會議內容。</p>
+            <p className="text-sm text-fg-faint">沒有找到相關的歷史會議內容。</p>
           )}
         </div>
       )}

@@ -19,7 +19,7 @@ export default function AnalysisPanel({
 }: AnalysisPanelProps) {
   if (loading) {
     return (
-      <section className="flex h-full items-center justify-center text-sm text-slate-400">
+      <section className="flex h-full items-center justify-center text-sm text-fg-subtle">
         AI 分析中…（橫向比對歷史背景）
       </section>
     );
@@ -27,7 +27,7 @@ export default function AnalysisPanel({
 
   if (!analysis) {
     return (
-      <section className="flex h-full items-center justify-center text-center text-sm text-slate-500">
+      <section className="flex h-full items-center justify-center text-center text-sm text-fg-faint">
         貼上逐字稿後按「分析」，這裡會顯示主題摘要、歷史衝突與行動方針。
       </section>
     );
@@ -37,27 +37,27 @@ export default function AnalysisPanel({
     <section className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
       {/* 會議主題 */}
       <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">會議主題</h3>
-        <p className="text-base font-semibold text-slate-100">{analysis.theme}</p>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-faint">會議主題</h3>
+        <p className="text-base font-semibold text-fg">{analysis.theme}</p>
       </div>
 
       {/* 關鍵討論摘要 */}
       <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">關鍵討論摘要</h3>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-faint">關鍵討論摘要</h3>
         {analysis.key_summary.length > 0 ? (
-          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
+          <ul className="list-disc space-y-1 pl-5 text-sm text-fg">
             {analysis.key_summary.map((s, i) => (
               <li key={i}>{s}</li>
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-slate-500">無摘要</p>
+          <p className="text-sm text-fg-faint">無摘要</p>
         )}
       </div>
 
       {/* 歷史衝突點 */}
       <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-faint">
           ⚠️ 歷史衝突點
         </h3>
         {analysis.historical_conflicts.length > 0 ? (
@@ -78,12 +78,12 @@ export default function AnalysisPanel({
 
       {/* 行動方針表格 */}
       <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">行動方針</h3>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-faint">行動方針</h3>
         {actionItems.length > 0 ? (
-          <div className="overflow-hidden rounded-lg border border-white/10">
+          <div className="overflow-hidden rounded-lg border border-line">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="bg-white/5 text-left text-xs text-slate-400">
+                <tr className="bg-hover-weak text-left text-xs text-fg-subtle">
                   <th className="px-3 py-2 font-medium">任務</th>
                   <th className="px-3 py-2 font-medium">負責人</th>
                   <th className="px-3 py-2 font-medium">截止日</th>
@@ -91,27 +91,27 @@ export default function AnalysisPanel({
               </thead>
               <tbody>
                 {actionItems.map((it, i) => (
-                  <tr key={i} className="border-t border-white/5">
-                    <td className="px-3 py-2 text-slate-100">{it.task}</td>
-                    <td className="px-3 py-2 text-slate-300">{it.assignee}</td>
-                    <td className="px-3 py-2 text-slate-300">{it.deadline}</td>
+                  <tr key={i} className="border-t border-line">
+                    <td className="px-3 py-2 text-fg">{it.task}</td>
+                    <td className="px-3 py-2 text-fg-muted">{it.assignee}</td>
+                    <td className="px-3 py-2 text-fg-muted">{it.deadline}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <p className="text-sm text-slate-500">未提取到行動方針</p>
+          <p className="text-sm text-fg-faint">未提取到行動方針</p>
         )}
       </div>
 
       {/* 採用的歷史背景（除錯/透明度） */}
       {historicalContext.trim() && (
-        <details className="rounded-lg border border-white/10 bg-brand-panel/60 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-slate-400">
+        <details className="rounded-lg border border-line bg-brand-panel/60 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-fg-subtle">
             本次比對採用的歷史背景
           </summary>
-          <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-slate-400">
+          <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-fg-subtle">
             {historicalContext}
           </pre>
         </details>

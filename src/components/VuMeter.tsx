@@ -13,12 +13,12 @@ export default function VuMeter({ level, label }: { level: VuLevel | null; label
   return (
     <div className="flex flex-col gap-1">
       {label && (
-        <div className="flex justify-between text-[11px] text-slate-400">
+        <div className="flex justify-between text-[11px] text-fg-subtle">
           <span>{label}</span>
           <span className="font-mono">{level ? `${level.db.toFixed(0)} dB` : "—"}</span>
         </div>
       )}
-      <div className="flex h-4 items-stretch gap-[2px] rounded bg-black/40 p-[2px]">
+      <div className="flex h-4 items-stretch gap-[2px] rounded bg-inset p-[2px]">
         {Array.from({ length: segments }).map((_, i) => {
           const isLit = i < litRms;
           const isPeak = i === peakSeg - 1;
@@ -32,7 +32,7 @@ export default function VuMeter({ level, label }: { level: VuLevel | null; label
             <div
               key={i}
               className={`flex-1 rounded-[1px] ${
-                isLit || isPeak ? color : "bg-white/5"
+                isLit || isPeak ? color : "bg-hover-weak"
               } ${isPeak ? "opacity-100" : isLit ? "opacity-90" : "opacity-100"}`}
             />
           );

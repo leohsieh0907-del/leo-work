@@ -4,13 +4,14 @@
 
 import { useState, useEffect, useRef } from "react";
 import { analyze, ingestMeeting, saveMeeting } from "../lib/api";
-import type {
-  ActionItem,
-  MeetingMeta,
-  ProactiveAnalysis,
-  SavedMeeting,
-  TranscribeLang,
-  TranscriptSegment,
+import {
+  AudioSourceState,
+  type ActionItem,
+  type MeetingMeta,
+  type ProactiveAnalysis,
+  type SavedMeeting,
+  type TranscribeLang,
+  type TranscriptSegment,
 } from "../shared/types";
 import { useAudioStore } from "../store/audioStore";
 
@@ -66,6 +67,13 @@ function defaultMeetingId(): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `會議-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
+/** 內部穩定 id：含秒＋亂數，避免同分鐘連開兩場新會議撞 id 互蓋（顯示名仍用 defaultMeetingId）。 */
+function newMeetingId(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const rand = Math.random().toString(36).slice(2, 6);
+  return `會議-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${rand}`;
+}
 function defaultMeetingDate(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
@@ -74,8 +82,19 @@ function defaultMeetingDate(): string {
 
 export default function Workspace() {
   const [transcript, setTranscript] = useState("");
-  const [meetingId, setMeetingId] = useState(defaultMeetingId);
+  // meetingId＝穩定識別（建立後不變、唯一，存檔/記憶都靠它）；meetingTitle＝可改的顯示名。
+  const [meetingId, setMeetingId] = useState(newMeetingId);
+  const [meetingTitle, setMeetingTitle] = useState(defaultMeetingId);
   const [meetingDate, setMeetingDate] = useState(defaultMeetingDate);
+  const [micBusy, setMicBusy] = useState(false); // 逐字稿區錄音/轉錄/匯入中
+  const lastPersistedRef = useRef(""); // 上次存檔/載入時的逐字稿，用來判斷是否有未存變更
+  // 錄音工作階段：綁定「開始錄音/匯入時的那場會議」，停止後逐字稿自動寫回原場（即使中途切去看別場）。
+  const recordingOriginRef = useRef<SavedMeeting | null>(null);
+  const wasCapturingRef = useRef(false);
+  const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
+  // 發言人改名：本場有效的對應（原名→新名），自動套用到之後併入的新逐字稿。
+  const speakerMapRef = useRef<Record<string, string>>({});
+  const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({});
 
   const [analysis, setAnalysis] = useState<ProactiveAnalysis | null>(null);
   const [actionItems, setActionItems] = useState<ActionItem[]>([]);
@@ -92,10 +111,38 @@ export default function Workspace() {
   const [chatBig, setChatBig] = useState(false); // 放大：給討論/匯出更大空間
 
   // 手機/電腦收音停止後的「整檔精修帶入會議」
-  const { recordingReady, recordingSeconds, recordingTruncated, finalizing, finalizeRecording } =
-    useAudioStore();
+  const {
+    state: routerState,
+    recordingReady,
+    recordingSeconds,
+    recordingTruncated,
+    finalizing,
+    finalizeRecording,
+  } = useAudioStore();
   const [routerLang, setRouterLang] = useState<TranscribeLang>("auto");
   const [importError, setImportError] = useState<string | null>(null);
+
+  // 擷取進行中（含精修）＝切換時視為錄音工作階段。
+  const capturing = micBusy || finalizing || routerState !== AudioSourceState.DISCONNECTED;
+  // 「真正在收音/錄音/匯入」——不含精修(finalizing)。用來抓「工作階段一開始」的上升緣，
+  // 否則 router 停止→精修會造成第二次上升緣，把快照重抓成（可能已切走的）目前會議 → 寫錯場。
+  const captureActive = micBusy || routerState !== AudioSourceState.DISCONNECTED;
+
+  // 擷取一開始就記住「原場」會議；停止後 routeRecordedText 會把逐字稿寫回這裡。
+  useEffect(() => {
+    if (captureActive && !wasCapturingRef.current) {
+      recordingOriginRef.current = {
+        id: meetingId,
+        title: meetingTitle,
+        date: meetingDate,
+        transcript,
+        analysis,
+        actionItems,
+        savedAt: "",
+      };
+    }
+    wasCapturingRef.current = captureActive;
+  }, [captureActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 收音停止後自動精修一次（避免使用者忘了按鈕、以為「沒輸出逐字稿」）；
   // 失敗緩衝會保留，故偶發網路抖動自動重試一次再放棄。
@@ -112,10 +159,7 @@ export default function Workspace() {
     setImportError(null);
     try {
       const clean = await finalizeRecording(routerLang);
-      const text = clean.trim();
-      if (text) {
-        setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
-      }
+      await routeRecordedText(clean);
     } catch (e) {
       if (!isRetry) {
         // 偶發網路抖動（fetch failed）：緩衝仍在，等一下自動重試一次
@@ -124,6 +168,96 @@ export default function Workspace() {
       }
       setImportError(e instanceof Error ? e.message : "精修失敗");
     }
+  }
+
+  /** 套用本場的發言人改名對應到一段文字。 */
+  function applySpeakerMap(text: string): string {
+    let out = text;
+    for (const [from, to] of Object.entries(speakerMapRef.current)) {
+      if (from) out = out.split(from).join(to);
+    }
+    return out;
+  }
+
+  /** 存檔（加密落地）＋寫入跨會議記憶；回傳記憶切片數。 */
+  async function persistMeeting(m: SavedMeeting): Promise<number> {
+    await saveMeeting(m);
+    const segments = parseTranscript(m.transcript);
+    if (segments.length === 0) return 0;
+    const meta: MeetingMeta = { meetingId: m.id, meetingDate: m.date, title: m.title };
+    const r = await ingestMeeting({ meeting: meta, segments });
+    return r.chunks;
+  }
+
+  /**
+   * 把一段新轉錄文字併入正確的會議（先套用發言人改名）：
+   *  - 錄音中途切去看別場 → 寫回「開始錄音那場」並存檔，不污染目前檢視。
+   *  - 否則 → 併入目前逐字稿。
+   */
+  async function routeRecordedText(raw: string) {
+    const origin = recordingOriginRef.current;
+    recordingOriginRef.current = null; // 取用即消耗
+    const text = applySpeakerMap(raw.trim());
+    if (!text) return;
+    if (origin && origin.id !== meetingId) {
+      const isoDate = origin.date
+        ? new Date(`${origin.date}T12:00:00`).toISOString()
+        : new Date().toISOString();
+      const merged = origin.transcript.trim() ? origin.transcript.trimEnd() + "\n" + text : text;
+      const saved: SavedMeeting = {
+        id: origin.id,
+        title: origin.title,
+        date: isoDate,
+        transcript: merged,
+        analysis: origin.analysis,
+        actionItems: origin.actionItems,
+        savedAt: new Date().toISOString(),
+      };
+      try {
+        await persistMeeting(saved);
+        setRecordingNotice(`🎙 錄音已自動存入會議「${origin.title}」（你正在看別場，未打斷）`);
+        setHistoryKey((k) => k + 1);
+      } catch (e) {
+        // 寫回失敗別讓這段錄音消失：暫併入目前畫面並提示，使用者可手動搬移。
+        setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
+        setRecordingNotice(
+          `⚠️ 錄音無法寫回「${origin.title}」（${e instanceof Error ? e.message : "未知錯誤"}），已暫放在目前逐字稿，請手動搬到正確會議。`,
+        );
+      }
+      // 寫回別場後本次工作階段結束，清掉發言人對應（目前畫面已是另一場）。
+      speakerMapRef.current = {};
+      setSpeakerMap({});
+    } else {
+      setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
+    }
+  }
+
+  /** 發言人改名：整份替換 ＋ 記住對應供之後併入的新逐字稿自動套用。 */
+  function handleRenameSpeaker(from: string, to: string) {
+    const f = from.trim();
+    const t = to.trim();
+    if (!f || !t || f === t) return;
+    setTranscript((prev) => prev.split(f).join(t));
+    speakerMapRef.current = { ...speakerMapRef.current, [f]: t };
+    setSpeakerMap(speakerMapRef.current);
+  }
+
+  /** 切換/新建會議前的守衛：錄音中允許切走（停止後自動寫回原場）；非錄音但有未存內容才確認。 */
+  function confirmSwitch(): boolean {
+    if (capturing) {
+      // 離開原場前，把原場最新內容更新進快照（停止後寫回時才是完整的）。
+      const o = recordingOriginRef.current;
+      if (o && o.id === meetingId) {
+        o.transcript = transcript;
+        o.analysis = analysis;
+        o.actionItems = actionItems;
+      }
+      return true;
+    }
+    if (transcript.trim() && transcript !== lastPersistedRef.current) {
+      return window.confirm("目前會議內容尚未存檔，切換將會遺失。確定要切換嗎？");
+    }
+    return true;
   }
 
   async function handleAnalyze() {
@@ -156,37 +290,28 @@ export default function Workspace() {
       setSaveError("請先輸入逐字稿");
       return;
     }
-    if (!meetingId.trim()) {
+    if (!meetingTitle.trim()) {
       setSaveError("請填寫會議名稱");
       return;
     }
     const isoDate = meetingDate
       ? new Date(`${meetingDate}T12:00:00`).toISOString()
       : new Date().toISOString();
+    const title = meetingTitle.trim();
+    const id = meetingId.trim();
     setSaving(true);
     try {
       const meeting: SavedMeeting = {
-        id: meetingId.trim(),
-        title: meetingId.trim(),
+        id,
+        title,
         date: isoDate,
         transcript,
         analysis,
         actionItems,
         savedAt: new Date().toISOString(),
       };
-      await saveMeeting(meeting);
-
-      const segments = parseTranscript(transcript);
-      let chunks = 0;
-      if (segments.length > 0) {
-        const meta: MeetingMeta = {
-          meetingId: meetingId.trim(),
-          meetingDate: isoDate,
-          title: meetingId.trim(),
-        };
-        const r = await ingestMeeting({ meeting: meta, segments });
-        chunks = r.chunks;
-      }
+      const chunks = await persistMeeting(meeting);
+      lastPersistedRef.current = transcript; // 標記已存，之後切換不再誤判為未存
       setSaveMsg(`✅ 已加密存檔，並存入記憶 ${chunks} 個切片`);
       setHistoryKey((k) => k + 1);
     } catch (e) {
@@ -199,6 +324,7 @@ export default function Workspace() {
   function handleLoadMeeting(m: SavedMeeting) {
     setTranscript(m.transcript);
     setMeetingId(m.id);
+    setMeetingTitle(m.title || m.id);
     setMeetingDate(m.date ? m.date.slice(0, 10) : defaultMeetingDate());
     setAnalysis(m.analysis);
     setActionItems(m.actionItems ?? []);
@@ -206,11 +332,20 @@ export default function Workspace() {
     setSaveMsg(null);
     setSaveError(null);
     setAnalyzeError(null);
+    setRecordingNotice(null);
+    // 錄音中切去看別場時，發言人對應屬於「錄音那場」，先別清（停止後寫回時還要用）。
+    if (!capturing) {
+      speakerMapRef.current = {};
+      setSpeakerMap({});
+    }
+    lastPersistedRef.current = m.transcript; // 剛載入＝已存狀態
   }
 
   function handleNew() {
+    if (!confirmSwitch()) return;
     setTranscript("");
-    setMeetingId(defaultMeetingId());
+    setMeetingId(newMeetingId());
+    setMeetingTitle(defaultMeetingId());
     setMeetingDate(defaultMeetingDate());
     setAnalysis(null);
     setActionItems([]);
@@ -218,6 +353,18 @@ export default function Workspace() {
     setSaveMsg(null);
     setSaveError(null);
     setAnalyzeError(null);
+    setRecordingNotice(null);
+    if (!capturing) {
+      speakerMapRef.current = {};
+      setSpeakerMap({});
+    }
+    lastPersistedRef.current = "";
+  }
+
+  /** 歷史欄改名後同步：若改的是目前開啟的會議，更新顯示名。 */
+  function handleRenamed(id: string, title: string) {
+    if (id === meetingId) setMeetingTitle(title);
+    setHistoryKey((k) => k + 1);
   }
 
   return (
@@ -227,27 +374,29 @@ export default function Workspace() {
         refreshKey={historyKey}
         onLoad={handleLoadMeeting}
         onNew={handleNew}
+        onRenamed={handleRenamed}
+        confirmSwitch={confirmSwitch}
       />
 
       <div className="flex h-full flex-1 flex-col gap-4 overflow-hidden p-4">
         {/* 會議中繼資料列 */}
-        <div className="flex flex-wrap items-end gap-3 rounded-lg border border-white/10 bg-brand-panel px-4 py-3">
-          <label className="flex flex-col gap-1 text-xs text-slate-400">
+        <div className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-brand-panel px-4 py-3">
+          <label className="flex flex-col gap-1 text-xs text-fg-subtle">
             會議名稱
             <input
               type="text"
-              value={meetingId}
-              onChange={(e) => setMeetingId(e.target.value)}
-              className="w-56 rounded-md border border-white/10 bg-brand-dark/60 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-brand"
+              value={meetingTitle}
+              onChange={(e) => setMeetingTitle(e.target.value)}
+              className="w-56 rounded-md border border-line bg-brand-dark/60 px-2 py-1.5 text-sm text-fg outline-none focus:border-brand"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-400">
+          <label className="flex flex-col gap-1 text-xs text-fg-subtle">
             會議日期
             <input
               type="date"
               value={meetingDate}
               onChange={(e) => setMeetingDate(e.target.value)}
-              className="rounded-md border border-white/10 bg-brand-dark/60 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-brand"
+              className="rounded-md border border-line bg-brand-dark/60 px-2 py-1.5 text-sm text-fg outline-none focus:border-brand"
             />
           </label>
 
@@ -272,10 +421,23 @@ export default function Workspace() {
           {saveError && <p className="w-full text-xs text-brand-danger">{saveError}</p>}
         </div>
 
+        {/* 錄音中切去看別場時，停止後逐字稿自動寫回原場的提示 */}
+        {recordingNotice && (
+          <div className="flex items-center gap-3 rounded-lg border border-brand-accent/40 bg-brand-accent/10 px-4 py-2 text-sm text-fg">
+            <span className="flex-1">{recordingNotice}</span>
+            <button
+              onClick={() => setRecordingNotice(null)}
+              className="text-fg-faint transition hover:text-fg"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* 收音停止後：把整段錄音精修成乾淨稿並帶入會議逐字稿 */}
         {(recordingReady || finalizing) && (
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-accent/40 bg-brand-accent/10 px-4 py-3">
-            <span className="text-sm text-slate-100">
+            <span className="text-sm text-fg">
               📥 收音已結束{recordingSeconds > 0 ? `（約 ${recordingSeconds} 秒）` : ""}
               {recordingTruncated ? "（超長，只精修前段）" : ""}—{" "}
               {finalizing ? "正在自動精修成乾淨稿帶入會議…" : "已自動精修；如需可重做"}
@@ -285,7 +447,7 @@ export default function Workspace() {
               onChange={(e) => setRouterLang(e.target.value as TranscribeLang)}
               disabled={finalizing}
               title="精修轉錄的輸出語言"
-              className="rounded-md border border-white/10 bg-brand-panel px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-brand disabled:opacity-50"
+              className="rounded-md border border-line bg-brand-panel px-2 py-1.5 text-xs text-fg outline-none focus:border-brand disabled:opacity-50"
             >
               <option value="auto">自動（原文，非中文附中譯）</option>
               <option value="zh">一律繁中</option>
@@ -304,10 +466,17 @@ export default function Workspace() {
 
         {/* 主體：左逐字稿、右分析 */}
         <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-2">
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-brand-panel/40 p-4">
-            <TranscriptPanel value={transcript} onChange={setTranscript} />
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-brand-panel/40 p-4">
+            <TranscriptPanel
+              value={transcript}
+              onChange={setTranscript}
+              onBusyChange={setMicBusy}
+              onRecordedText={routeRecordedText}
+              onRenameSpeaker={handleRenameSpeaker}
+              speakerMap={speakerMap}
+            />
           </div>
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-brand-panel/40 p-4">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-brand-panel/40 p-4">
             {analyzeError && <p className="mb-2 text-xs text-brand-danger">{analyzeError}</p>}
             <div className="min-h-0 flex-1">
               <AnalysisPanel
@@ -320,32 +489,27 @@ export default function Workspace() {
           </div>
         </div>
 
-        {/* 底部：🦉 AI 助理（聊天 ＋ 討論完匯出，整合自原本兩個重複面板）。可收合、可放大。*/}
-        {chatOpen ? (
-          <div
-            className={`${chatBig ? "h-[32rem]" : "h-80"} shrink-0 rounded-lg border border-white/10 bg-brand-panel/40 p-4`}
-          >
-            <ChatAssistant
-              transcript={transcript}
-              analysis={analysis}
-              actionItems={actionItems}
-              meetingTitle={meetingId}
-              meetingDate={meetingDate}
-              big={chatBig}
-              onToggleBig={() => setChatBig((v) => !v)}
-              onCollapse={() => setChatOpen(false)}
-            />
-          </div>
-        ) : (
-          <button
-            onClick={() => setChatOpen(true)}
-            className="flex shrink-0 items-center gap-2 rounded-lg border border-white/10 bg-brand-panel/40 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-brand-panel/60"
-          >
-            <span className="text-lg">🦉</span>
-            <span className="font-medium">AI 助理</span>
-            <span className="text-xs text-slate-500">— 聊當前會議 ＋ 跨會議記憶，談妥一鍵匯出 Word/Excel/PPT</span>
-          </button>
-        )}
+        {/* 底部：🦉 AI 助理。永遠掛載（收合只切顯示，不卸載）→ 對話不會被清空。*/}
+        <div
+          className={
+            chatOpen
+              ? `${chatBig ? "h-[32rem]" : "h-80"} shrink-0 rounded-lg border border-line bg-brand-panel/40 p-4`
+              : "shrink-0"
+          }
+        >
+          <ChatAssistant
+            transcript={transcript}
+            analysis={analysis}
+            actionItems={actionItems}
+            meetingTitle={meetingTitle}
+            meetingDate={meetingDate}
+            big={chatBig}
+            onToggleBig={() => setChatBig((v) => !v)}
+            onCollapse={() => setChatOpen(false)}
+            collapsed={!chatOpen}
+            onExpand={() => setChatOpen(true)}
+          />
+        </div>
       </div>
     </div>
   );

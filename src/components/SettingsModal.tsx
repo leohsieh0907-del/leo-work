@@ -52,7 +52,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   const inputCls =
-    "w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-brand";
+    "w-full rounded-md border border-line bg-inset px-3 py-2 text-sm outline-none focus:border-brand";
 
   return (
     <div
@@ -60,12 +60,12 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-white/10 bg-brand-panel p-5 shadow-xl"
+        className="w-full max-w-md rounded-xl border border-line bg-brand-panel p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center">
           <h2 className="text-base font-semibold">⚙️ 設定</h2>
-          <button onClick={onClose} className="ml-auto text-slate-400 hover:text-white">
+          <button onClick={onClose} className="ml-auto text-fg-subtle hover:text-fg">
             ✕
           </button>
         </div>
@@ -76,7 +76,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        <label className="mb-1 block text-sm text-slate-300">
+        <label className="mb-1 block text-sm text-fg-muted">
           Gemini API 金鑰
           {status?.hasGeminiKey && (
             <span className="ml-2 text-xs text-emerald-400">✅ 已設定（留空＝不變更）</span>
@@ -89,11 +89,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           placeholder={status?.hasGeminiKey ? "••••••（已設定）" : "貼上 AIza... 金鑰"}
           className={`mb-1 ${inputCls}`}
         />
-        <p className="mb-4 text-xs text-slate-500">
+        <p className="mb-4 text-xs text-fg-faint">
           錄音轉錄 / AI 助理 / 即時逐字稿需要；到 Google AI Studio 免費申請。
         </p>
 
-        <label className="mb-1 block text-sm text-slate-300">
+        <label className="mb-1 block text-sm text-fg-muted">
           Groq API 金鑰（後援）
           {status?.hasGroqKey && (
             <span className="ml-2 text-xs text-emerald-400">✅ 已設定（留空＝不變更）</span>
@@ -106,11 +106,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           placeholder={status?.hasGroqKey ? "••••••（已設定）" : "貼上 gsk_... 金鑰"}
           className={`mb-1 ${inputCls}`}
         />
-        <p className="mb-4 text-xs text-slate-500">
+        <p className="mb-4 text-xs text-fg-faint">
           Gemini 過載/限流時，分析・翻譯・聊天自動改用 Groq 接手；到 console.groq.com 免費申請。
         </p>
 
-        <label className="mb-1 block text-sm text-slate-300">LLM 來源（分析 / 翻譯）</label>
+        <label className="mb-1 block text-sm text-fg-muted">LLM 來源（分析 / 翻譯）</label>
         <select
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
@@ -121,7 +121,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <option value="claude">Claude（付費，需 ANTHROPIC_API_KEY）</option>
         </select>
 
-        <label className="mb-1 block text-sm text-slate-300">Gemini 模型（選填）</label>
+        <label className="mb-1 block text-sm text-fg-muted">Gemini 模型（選填）</label>
         <input
           value={model}
           onChange={(e) => setModel(e.target.value)}
@@ -143,7 +143,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="flex justify-end gap-2">
             <button
               onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-sm text-slate-300 hover:text-white"
+              className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:text-fg"
             >
               取消
             </button>

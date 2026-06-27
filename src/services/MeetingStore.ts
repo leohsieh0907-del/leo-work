@@ -76,6 +76,26 @@ export class MeetingStore {
     return item;
   }
 
+  /** 改名（只改顯示用 title，id/檔名不動 → 不影響跨會議記憶、不產生重複檔）。 */
+  async rename(id: string, title: string): Promise<MeetingListItem> {
+    const t = title.trim();
+    if (!t) throw new AppError(ErrorCode.INVALID_INPUT, "新名稱不可為空");
+    const meeting = await this.load(id); // 找不到會丟錯
+    meeting.title = t;
+    await this.security.encryptToFile(
+      this.meetingPath(id),
+      Buffer.from(JSON.stringify(meeting), "utf8"),
+      this.secretKey,
+    );
+    const items = await this.list();
+    const idx = items.findIndex((m) => m.id === id);
+    const item: MeetingListItem = { id, title: t, date: meeting.date, savedAt: meeting.savedAt };
+    if (idx >= 0) items[idx] = { ...items[idx], title: t };
+    else items.unshift(item);
+    await this.writeIndex(items);
+    return idx >= 0 ? items[idx] : item;
+  }
+
   /** 讀回一場會議（解密）。 */
   async load(id: string): Promise<SavedMeeting> {
     const buf = await this.security.decryptFromFile(this.meetingPath(id), this.secretKey);

@@ -113,6 +113,20 @@ export async function loadMeeting(id: string): Promise<{ meeting: SavedMeeting }
   return (await r.json()) as { meeting: SavedMeeting };
 }
 
+/** 改名（只改顯示用 title，id 不動）。 */
+export async function renameMeeting(id: string, title: string): Promise<{ item: MeetingListItem }> {
+  const r = await fetch(`${BASE}/meetings/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!r.ok) {
+    const err = (await r.json().catch(() => null)) as ApiErrorBody | null;
+    throw new Error(err?.error?.message ?? `改名失敗（${r.status}）`);
+  }
+  return (await r.json()) as { item: MeetingListItem };
+}
+
 /** 刪除一場會議。 */
 export async function deleteMeeting(id: string): Promise<{ ok: true }> {
   const r = await fetch(`${BASE}/meetings/${encodeURIComponent(id)}`, { method: "DELETE" });

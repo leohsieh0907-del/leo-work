@@ -51,16 +51,16 @@ export function RouterBar() {
   return (
     <div className="flex min-w-0 items-center gap-2">
       <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${STATE_COLOR[state]}`} />
-      <span className="hidden shrink-0 text-xs font-medium text-slate-300 lg:inline">{STATE_LABEL[state]}</span>
+      <span className="hidden shrink-0 text-xs font-medium text-fg-muted lg:inline">{STATE_LABEL[state]}</span>
 
-      <div className="inline-flex shrink-0 rounded-lg border border-white/10 bg-black/30 p-0.5">
+      <div className="inline-flex shrink-0 rounded-lg border border-line bg-inset p-0.5">
         {SOURCES.map((s) => (
           <button
             key={s.id}
             disabled={busy}
             onClick={() => onSource(s.id)}
             className={`rounded-md px-2.5 py-1 text-xs transition ${
-              active === s.id ? "bg-brand text-white" : "text-slate-300 hover:text-white"
+              active === s.id ? "bg-brand text-white" : "text-fg-muted hover:text-fg"
             } disabled:opacity-50`}
           >
             {s.label}
@@ -123,16 +123,16 @@ export function RouterDetails() {
   if (!hasContent) return null;
 
   return (
-    <div className="flex flex-col gap-3 border-b border-white/10 bg-brand-panel/60 px-5 py-3">
+    <div className="flex flex-col gap-3 border-b border-line bg-brand-panel/60 px-5 py-3">
       {/* 手機收音：QR + 連線指引（可收放，避免擋位置）*/}
       {phoneActive && (
-        <div className="rounded-md border border-white/10 bg-black/20">
+        <div className="rounded-md border border-line bg-inset">
           <button
             onClick={() => setQrOpen((v) => !v)}
-            className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/5"
+            className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-fg transition hover:bg-hover-weak"
           >
             <span>📱 用手機掃 QR 當無線麥克風</span>
-            <span className="text-xs text-slate-400">{qrOpen ? "▾ 收起 QR" : "▸ 展開 QR"}</span>
+            <span className="text-xs text-fg-subtle">{qrOpen ? "▾ 收起 QR" : "▸ 展開 QR"}</span>
           </button>
           {qrOpen && (
             <div className="flex flex-wrap items-center gap-4 px-3 pb-3">
@@ -143,18 +143,18 @@ export function RouterDetails() {
                     alt="手機收音 QR"
                     className="h-32 w-32 shrink-0 rounded bg-white p-1"
                   />
-                  <div className="flex flex-col gap-1 text-xs text-slate-300">
+                  <div className="flex flex-col gap-1 text-xs text-fg-muted">
                     <span>1. 手機與電腦連同一個 Wi-Fi，掃描左方 QR</span>
                     <span>2. 首次會跳「憑證不受信任」→ 選繼續前往（自簽憑證，正常）</span>
                     <span>3. 開頁後按「開始傳送」，聲音即時回傳並轉成逐字稿</span>
-                    <span className="mt-1 break-all text-slate-500">{phoneSession.url}</span>
-                    <span className="text-slate-500">手機開始傳送後，上方音量條會跳動、即時逐字稿會出現。</span>
+                    <span className="mt-1 break-all text-fg-faint">{phoneSession.url}</span>
+                    <span className="text-fg-faint">手機開始傳送後，上方音量條會跳動、即時逐字稿會出現。</span>
                   </div>
                 </>
               ) : phoneSessionErr ? (
                 <span className="text-xs text-brand-danger">取得手機連線資訊失敗：{phoneSessionErr}</span>
               ) : (
-                <span className="text-xs text-slate-400">產生手機連線 QR 中…</span>
+                <span className="text-xs text-fg-subtle">產生手機連線 QR 中…</span>
               )}
             </div>
           )}
@@ -167,13 +167,13 @@ export function RouterDetails() {
           <span className="text-xs text-blue-300">
             🔵 藍牙傳輸{status.bluetooth.priority === "background" ? "（背景低優先）" : ""}
           </span>
-          <div className="h-2 flex-1 overflow-hidden rounded bg-black/40">
+          <div className="h-2 flex-1 overflow-hidden rounded bg-inset">
             <div
               className="h-full bg-blue-400 transition-all"
               style={{ width: `${Math.round(status.bluetooth.progress * 100)}%` }}
             />
           </div>
-          <span className="font-mono text-xs text-slate-300">
+          <span className="font-mono text-xs text-fg-muted">
             {Math.round(status.bluetooth.progress * 100)}%
           </span>
         </div>
@@ -182,13 +182,13 @@ export function RouterDetails() {
       {/* 即時逐字稿（手機收音、電腦即時看）。即時稿只是預覽、且 Gemini Live 偶有延遲/不穩，
           沒字時給提示，避免使用者以為壞了——可靠逐字稿來自「停止」後的整檔精修。*/}
       {realtimeActive && (
-        <div className="max-h-20 overflow-y-auto rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
+        <div className="max-h-20 overflow-y-auto rounded-md border border-line bg-inset px-3 py-2 text-xs text-fg-muted">
           {transcript ? (
             <>
-              <span className="text-slate-500">即時逐字稿：</span> {transcript}
+              <span className="text-fg-faint">即時逐字稿：</span> {transcript}
             </>
           ) : (
-            <span className="text-slate-500">
+            <span className="text-fg-faint">
               即時稿準備中…（即時稿僅為預覽；最終逐字稿以「停止」後的整檔精修為準）
             </span>
           )}

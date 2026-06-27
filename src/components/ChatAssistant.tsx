@@ -41,6 +41,8 @@ export default function ChatAssistant({
   big,
   onToggleBig,
   onCollapse,
+  collapsed,
+  onExpand,
 }: {
   transcript: string;
   analysis: ProactiveAnalysis | null;
@@ -50,6 +52,8 @@ export default function ChatAssistant({
   big?: boolean;
   onToggleBig?: () => void;
   onCollapse?: () => void;
+  collapsed?: boolean;
+  onExpand?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]); // 上一則回答後的「接下來可做」建議
@@ -158,15 +162,57 @@ export default function ChatAssistant({
     }
   }
 
+  /** CSV：資料攤平匯出，走本機預設範本（零 API，不經 AI 重組）。 */
+  async function runCsv() {
+    if (!analysis) return;
+    setExportErr(null);
+    setExporting("csv");
+    try {
+      const m = await import("../lib/exporters");
+      await m.exportCsv({
+        title: meetingTitle?.trim() || "會議記錄",
+        date: meetingDate?.trim() || new Date().toISOString().slice(0, 10),
+        analysis,
+        actionItems,
+        transcript,
+      });
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : "匯出失敗");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   const expBtn =
-    "rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-40";
+    "rounded-md border border-line bg-hover-weak px-2.5 py-1 text-xs text-fg transition hover:bg-hover disabled:opacity-40";
+
+  // 收合：只顯示一條按鈕，但元件仍掛載 → 對話狀態不會被清空（展開後還在）。
+  if (collapsed) {
+    return (
+      <button
+        onClick={onExpand}
+        className="flex w-full shrink-0 items-center gap-2 rounded-lg border border-line bg-brand-panel/40 px-4 py-2.5 text-sm text-fg transition hover:bg-brand-panel/60"
+      >
+        <span className="text-lg">🦉</span>
+        <span className="font-medium">AI 助理</span>
+        <span className="hidden text-xs text-fg-faint sm:inline">
+          — 聊當前會議 ＋ 跨會議記憶，談妥一鍵匯出 Word/Excel/PPT/CSV
+        </span>
+        {messages.length > 0 && (
+          <span className="ml-auto rounded-full bg-brand/20 px-2 py-0.5 text-xs text-fg">
+            {messages.length} 則對話
+          </span>
+        )}
+      </button>
+    );
+  }
 
   return (
     <section className="flex h-full flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-lg">🦉</span>
-        <h2 className="text-sm font-semibold text-slate-200">AI 助理</h2>
-        <span className="hidden text-xs text-slate-500 sm:inline">問當前會議 ＋ 跨會議記憶 ＋ 討論完匯出</span>
+        <h2 className="text-sm font-semibold text-fg">AI 助理</h2>
+        <span className="hidden text-xs text-fg-faint sm:inline">問當前會議 ＋ 跨會議記憶 ＋ 討論完匯出</span>
         <div className="ml-auto flex items-center gap-3">
           {messages.length > 0 && (
             <button
@@ -174,18 +220,18 @@ export default function ChatAssistant({
                 setMessages([]);
                 setSuggestions([]);
               }}
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-fg-faint hover:text-fg-muted"
             >
               清空
             </button>
           )}
           {onToggleBig && (
-            <button onClick={onToggleBig} className="text-xs text-slate-500 hover:text-slate-300">
+            <button onClick={onToggleBig} className="text-xs text-fg-faint hover:text-fg-muted">
               {big ? "⤡ 縮小" : "⤢ 放大"}
             </button>
           )}
           {onCollapse && (
-            <button onClick={onCollapse} className="text-xs text-slate-500 hover:text-slate-300">
+            <button onClick={onCollapse} className="text-xs text-fg-faint hover:text-fg-muted">
               ▾ 收起
             </button>
           )}
@@ -194,7 +240,7 @@ export default function ChatAssistant({
 
       {/* 匯出列：聊完／討論完後一鍵產出 */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-slate-500">匯出：</span>
+        <span className="text-xs text-fg-faint">匯出：</span>
         <button onClick={handleCopy} disabled={!analysis} className={expBtn}>
           {copied ? "✓ 已複製" : "📋 複製"}
         </button>
@@ -207,21 +253,24 @@ export default function ChatAssistant({
         <button onClick={() => void runExport("xlsx")} disabled={!analysis || exporting !== null} className={expBtn}>
           {exporting === "xlsx" ? "產生中…" : "📊 Excel"}
         </button>
+        <button onClick={() => void runCsv()} disabled={!analysis || exporting !== null} className={expBtn}>
+          {exporting === "csv" ? "產生中…" : "📑 CSV"}
+        </button>
         <button onClick={() => void runExport("pptx")} disabled={!analysis || exporting !== null} className={expBtn}>
           {exporting === "pptx" ? "產生中…" : "📽 PPT"}
         </button>
         {!analysis ? (
-          <span className="text-[11px] text-slate-500">先按上方「分析」才能匯出</span>
+          <span className="text-[11px] text-fg-faint">先按上方「分析」才能匯出</span>
         ) : aiMode ? (
           <span className="text-[11px] text-brand-accent">✨ 將依本次討論用 AI 重組後產檔</span>
         ) : null}
       </div>
       {exportErr && <p className="text-xs text-brand-danger">匯出失敗：{exportErr}</p>}
 
-      <div className="flex-1 space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-brand-dark/40 p-3">
+      <div className="flex-1 space-y-2 overflow-y-auto rounded-lg border border-line bg-brand-dark/40 p-3">
         {messages.length === 0 ? (
           <div className="space-y-3">
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-fg-subtle">
               需要什麼？直接問我——我看得到目前的逐字稿，也記得你存過的歷史會議。談妥後可直接從上方「匯出」一鍵產出 Word/Excel/PPT。
             </p>
             <div className="flex flex-wrap gap-2">
@@ -229,7 +278,7 @@ export default function ChatAssistant({
                 <button
                   key={s}
                   onClick={() => void send(s)}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition hover:bg-white/10"
+                  className="rounded-full border border-line bg-hover-weak px-3 py-1 text-xs text-fg-muted transition hover:bg-hover"
                 >
                   {s}
                 </button>
@@ -241,7 +290,7 @@ export default function ChatAssistant({
             <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
               <div
                 className={`max-w-[85%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm leading-relaxed ${
-                  m.role === "user" ? "bg-brand text-white" : "bg-brand-panel text-slate-100"
+                  m.role === "user" ? "bg-brand text-white" : "bg-brand-panel text-fg"
                 }`}
               >
                 {m.text}
@@ -251,18 +300,18 @@ export default function ChatAssistant({
         )}
         {loading && (
           <div className="flex justify-start">
-            <div className="rounded-lg bg-brand-panel px-3 py-2 text-sm text-slate-400">思考中…</div>
+            <div className="rounded-lg bg-brand-panel px-3 py-2 text-sm text-fg-subtle">思考中…</div>
           </div>
         )}
         {!loading && suggestions.length > 0 && (
           <div className="flex flex-col gap-1.5 pt-1">
-            <span className="text-[11px] text-slate-500">💡 接下來可以…</span>
+            <span className="text-[11px] text-fg-faint">💡 接下來可以…</span>
             <div className="flex flex-wrap gap-2">
               {suggestions.map((s) => (
                 <button
                   key={s}
                   onClick={() => void send(s)}
-                  className="rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs text-slate-200 transition hover:bg-brand/20"
+                  className="rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs text-fg transition hover:bg-brand/20"
                 >
                   {s}
                 </button>
@@ -278,7 +327,7 @@ export default function ChatAssistant({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKey}
           placeholder="問問題或討論要怎麼整理…（Enter 送出；談妥按上方匯出）"
-          className="flex-1 rounded-md border border-white/10 bg-brand-dark/60 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand"
+          className="flex-1 rounded-md border border-line bg-brand-dark/60 px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-faint focus:border-brand"
         />
         <button
           onClick={() => void send()}

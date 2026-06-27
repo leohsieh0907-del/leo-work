@@ -81,17 +81,17 @@ export default function AudioSourcePanel() {
   }
 
   return (
-    <div className="flex flex-col gap-3 border-b border-white/10 bg-brand-panel/60 px-5 py-3">
+    <div className="flex flex-col gap-3 border-b border-line bg-brand-panel/60 px-5 py-3">
       <div className="flex flex-wrap items-center gap-4">
         {/* 來源切換開關 */}
-        <div className="inline-flex rounded-lg border border-white/10 bg-black/30 p-0.5">
+        <div className="inline-flex rounded-lg border border-line bg-inset p-0.5">
           {(["computer", "phone"] as AudioSourceKind[]).map((s) => (
             <button
               key={s}
               disabled={active}
               onClick={() => setSource(s)}
               className={`rounded-md px-3 py-1.5 text-sm transition ${
-                source === s ? "bg-brand text-white" : "text-slate-300 hover:text-white"
+                source === s ? "bg-brand text-white" : "text-fg-muted hover:text-fg"
               } disabled:opacity-50`}
             >
               {s === "computer" ? "🖥️ 電腦系統" : "📱 手機連線"}
@@ -125,7 +125,7 @@ export default function AudioSourcePanel() {
         </div>
 
         {/* 狀態 */}
-        <div className="text-xs text-slate-400">
+        <div className="text-xs text-fg-subtle">
           {status ? (
             <span>
               {status.active ? "收音中" : "閒置"}
@@ -148,13 +148,13 @@ export default function AudioSourcePanel() {
 
       {/* 手機來源：QR Code */}
       {source === "phone" && session && (
-        <div className="flex items-center gap-4 rounded-md border border-white/10 bg-black/20 p-3">
+        <div className="flex items-center gap-4 rounded-md border border-line bg-inset p-3">
           <img src={session.qrDataUrl} alt="手機連線 QR" className="h-28 w-28 rounded bg-white p-1" />
-          <div className="text-xs text-slate-300">
-            <p className="mb-1 font-medium text-slate-100">用手機掃描連線收音</p>
-            <p className="text-slate-400">區網位址：</p>
+          <div className="text-xs text-fg-muted">
+            <p className="mb-1 font-medium text-fg">用手機掃描連線收音</p>
+            <p className="text-fg-subtle">區網位址：</p>
             <p className="font-mono text-brand-accent">{session.url}</p>
-            <p className="mt-2 text-[11px] text-slate-500">
+            <p className="mt-2 text-[11px] text-fg-faint">
               手機需與電腦在同一 Wi-Fi；首次連線會出現「不安全憑證」警告（自簽憑證），點「繼續前往」即可。
             </p>
           </div>
@@ -163,8 +163,8 @@ export default function AudioSourcePanel() {
 
       {/* 即時逐字稿（手機收音、電腦即時看） */}
       {active && transcript && (
-        <div className="max-h-20 overflow-y-auto rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
-          <span className="text-slate-500">即時逐字稿：</span> {transcript}
+        <div className="max-h-20 overflow-y-auto rounded-md border border-line bg-inset px-3 py-2 text-xs text-fg-muted">
+          <span className="text-fg-faint">即時逐字稿：</span> {transcript}
         </div>
       )}
 

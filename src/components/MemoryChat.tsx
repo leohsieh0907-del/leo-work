@@ -64,16 +64,16 @@ export default function MemoryChat() {
       {started ? (
         // ── 對話進行中：訊息串 + 底部輸入 ──
         <>
-          <div className="flex items-center gap-2 border-b border-white/10 px-6 py-3">
+          <div className="flex items-center gap-2 border-b border-line px-6 py-3">
             <span className="text-lg">🦉</span>
-            <h2 className="text-sm font-semibold text-slate-200">記憶聊天</h2>
-            <span className="text-xs text-slate-500">跨會議記憶</span>
+            <h2 className="text-sm font-semibold text-fg">記憶聊天</h2>
+            <span className="text-xs text-fg-faint">跨會議記憶</span>
             <button
               onClick={() => {
                 setMessages([]);
                 setSuggestions([]);
               }}
-              className="ml-auto text-xs text-slate-500 hover:text-slate-300"
+              className="ml-auto text-xs text-fg-faint hover:text-fg-muted"
             >
               ＋ 新對話
             </button>
@@ -85,7 +85,7 @@ export default function MemoryChat() {
                 <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
                   <div
                     className={`max-w-[85%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm leading-relaxed ${
-                      m.role === "user" ? "bg-brand text-white" : "bg-brand-panel text-slate-100"
+                      m.role === "user" ? "bg-brand text-white" : "bg-brand-panel text-fg"
                     }`}
                   >
                     {m.text}
@@ -94,18 +94,18 @@ export default function MemoryChat() {
               ))}
               {loading && (
                 <div className="flex justify-start">
-                  <div className="rounded-lg bg-brand-panel px-3 py-2 text-sm text-slate-400">思考中…</div>
+                  <div className="rounded-lg bg-brand-panel px-3 py-2 text-sm text-fg-subtle">思考中…</div>
                 </div>
               )}
               {!loading && suggestions.length > 0 && (
                 <div className="flex flex-col gap-1.5 pt-1">
-                  <span className="text-[11px] text-slate-500">💡 接下來可以…</span>
+                  <span className="text-[11px] text-fg-faint">💡 接下來可以…</span>
                   <div className="flex flex-wrap gap-2">
                     {suggestions.map((s) => (
                       <button
                         key={s}
                         onClick={() => void send(s)}
-                        className="rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs text-slate-200 transition hover:bg-brand/20"
+                        className="rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs text-fg transition hover:bg-brand/20"
                       >
                         {s}
                       </button>
@@ -116,7 +116,7 @@ export default function MemoryChat() {
             </div>
           </div>
 
-          <div className="border-t border-white/10 px-6 py-4">
+          <div className="border-t border-line px-6 py-4">
             <div className="mx-auto max-w-3xl">
               <InputBar
                 input={input}
@@ -134,9 +134,9 @@ export default function MemoryChat() {
           <div className="mx-auto w-full max-w-3xl px-6 py-12">
             <div className="mb-2 flex items-center justify-center gap-3">
               <span className="text-4xl">🦉</span>
-              <h1 className="text-3xl font-bold text-slate-100">語音轉文字 可以幫您做些什麼？</h1>
+              <h1 className="text-3xl font-bold text-fg">語音轉文字 可以幫您做些什麼？</h1>
             </div>
-            <p className="mb-8 text-center text-lg font-medium text-slate-400">您的記憶在內</p>
+            <p className="mb-8 text-center text-lg font-medium text-fg-subtle">您的記憶在內</p>
 
             <InputBar
               input={input}
@@ -147,20 +147,20 @@ export default function MemoryChat() {
               big
             />
 
-            <p className="mb-3 mt-10 text-sm text-slate-400">
+            <p className="mb-3 mt-10 text-sm text-fg-subtle">
               看看語音轉文字的記憶聊天能為您做些什麼：
             </p>
-            <div className="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10 bg-brand-panel/40">
+            <div className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-brand-panel/40">
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s.label}
                   onClick={() => void send(s.prompt)}
                   disabled={loading}
-                  className="flex w-full items-center gap-4 px-5 py-3.5 text-left transition hover:bg-white/5 disabled:opacity-50"
+                  className="flex w-full items-center gap-4 px-5 py-3.5 text-left transition hover:bg-hover-weak disabled:opacity-50"
                 >
                   <span className="w-6 shrink-0 text-center text-xl">{s.icon}</span>
-                  <span className="w-28 shrink-0 font-medium text-slate-200">{s.label}</span>
-                  <span className="text-sm text-slate-400">{s.prompt}</span>
+                  <span className="w-28 shrink-0 font-medium text-fg">{s.label}</span>
+                  <span className="text-sm text-fg-subtle">{s.prompt}</span>
                 </button>
               ))}
             </div>
@@ -194,7 +194,7 @@ function InputBar({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKey}
         placeholder="請輸入文字…"
-        className={`w-full rounded-full border border-white/10 bg-brand-dark/60 pl-5 pr-14 text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand ${
+        className={`w-full rounded-full border border-line bg-brand-dark/60 pl-5 pr-14 text-fg outline-none placeholder:text-fg-faint focus:border-brand ${
           big ? "py-4 text-base" : "py-3 text-sm"
         }`}
       />

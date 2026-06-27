@@ -2,8 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 暗色（預設）。亮色在 [data-theme="light"] 覆蓋。 */
 :root {
   color-scheme: dark;
+  --bg: #0a0e1a;
+  --panel: #121829;
+  --inset: #0a0f1e;
+  --fg: #f1f5f9;
+  --fg-muted: #cbd5e1;
+  --fg-subtle: #94a3b8;
+  --fg-faint: #64748b;
+  --line: rgba(255, 255, 255, 0.1);
+  --hover: rgba(255, 255, 255, 0.1);
+  --hover-weak: rgba(255, 255, 255, 0.05);
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef2f7;
+  --panel: #ffffff;
+  --inset: #e7ecf3;
+  --fg: #0f172a;
+  --fg-muted: #334155;
+  --fg-subtle: #64748b;
+  --fg-faint: #94a3b8;
+  --line: rgba(15, 23, 42, 0.12);
+  --hover: rgba(15, 23, 42, 0.07);
+  --hover-weak: rgba(15, 23, 42, 0.04);
 }
 html,
 body,
@@ -12,7 +36,8 @@ body,
   margin: 0;
 }
 body {
-  @apply bg-brand-dark text-slate-100 antialiased;
+  @apply bg-brand-dark text-fg antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 .mono {
   @apply font-mono text-sm leading-relaxed;

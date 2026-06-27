@@ -459,6 +459,18 @@ app.delete(
   }),
 );
 
+app.patch(
+  "/meetings/:id",
+  wrap(async (req, res) => {
+    const { title } = req.body as { title?: string };
+    if (typeof title !== "string" || !title.trim()) {
+      throw new AppError(ErrorCode.INVALID_INPUT, "需提供新名稱 title");
+    }
+    const item = await meetingStore.rename(req.params.id, title);
+    res.json({ item });
+  }),
+);
+
 // 階段三：翻譯（保留時間戳記）
 app.post(
   "/translate",

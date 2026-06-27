@@ -6,6 +6,7 @@ import Workspace from "./components/Workspace";
 import { RouterBar, RouterDetails } from "./components/RouterPanel";
 import MemoryChat from "./components/MemoryChat";
 import SettingsModal from "./components/SettingsModal";
+import { getTheme, toggleTheme, type Theme } from "./lib/theme";
 
 // ── App 外殼：頂部狀態列 + 主工作區 ──
 // Workspace 由前端元件模組實作（逐字稿輸入、主動式分析、跨會議記憶檢索）。
@@ -17,6 +18,7 @@ export default function App() {
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [theme, setTheme] = useState<Theme>(getTheme());
 
   // 啟動時輪詢 sidecar 是否就緒（Node 服務啟動需一點時間）
   useEffect(() => {
@@ -72,29 +74,29 @@ export default function App() {
           {!updating && (
             <button
               onClick={() => setUpdate(null)}
-              className="text-slate-400 hover:text-white"
+              className="text-fg-subtle hover:text-fg"
             >
               稍後
             </button>
           )}
         </div>
       )}
-      <header className="flex items-center gap-3 border-b border-white/10 bg-brand-panel px-5 py-2.5">
+      <header className="flex items-center gap-3 border-b border-line bg-brand-panel px-5 py-2.5">
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-brand-accent text-lg">◆</span>
           <h1 className="text-base font-semibold tracking-wide">語音轉文字</h1>
-          <span className="text-[11px] font-medium text-slate-500">v{__APP_VERSION__}</span>
-          <span className="ml-1 hidden rounded bg-white/5 px-2 py-0.5 text-xs text-slate-400 xl:inline">
+          <span className="text-[11px] font-medium text-fg-faint">v{__APP_VERSION__}</span>
+          <span className="ml-1 hidden rounded bg-hover-weak px-2 py-0.5 text-xs text-fg-subtle xl:inline">
             本地隱私 · 跨會議記憶
           </span>
         </div>
 
         {ready && (
-          <div className="inline-flex shrink-0 rounded-lg border border-white/10 bg-black/30 p-0.5 text-sm">
+          <div className="inline-flex shrink-0 rounded-lg border border-line bg-inset p-0.5 text-sm">
             <button
               onClick={() => setView("workspace")}
               className={`rounded-md px-3 py-1.5 transition ${
-                view === "workspace" ? "bg-brand text-white" : "text-slate-300 hover:text-white"
+                view === "workspace" ? "bg-brand text-white" : "text-fg-muted hover:text-fg"
               }`}
             >
               工作區
@@ -102,7 +104,7 @@ export default function App() {
             <button
               onClick={() => setView("memory")}
               className={`rounded-md px-3 py-1.5 transition ${
-                view === "memory" ? "bg-brand text-white" : "text-slate-300 hover:text-white"
+                view === "memory" ? "bg-brand text-white" : "text-fg-muted hover:text-fg"
               }`}
             >
               🦉 記憶聊天
@@ -118,11 +120,18 @@ export default function App() {
         )}
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => setTheme(toggleTheme())}
+            title={theme === "dark" ? "切換亮色（白天）" : "切換暗色（夜間）"}
+            className="rounded-md px-2 py-1 text-fg-muted transition hover:bg-hover hover:text-fg"
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
           {ready && (
             <button
               onClick={() => setShowSettings(true)}
               title="設定"
-              className="rounded-md px-2 py-1 text-slate-300 transition hover:bg-white/10 hover:text-white"
+              className="rounded-md px-2 py-1 text-fg-muted transition hover:bg-hover hover:text-fg"
             >
               ⚙️
             </button>
@@ -146,7 +155,7 @@ export default function App() {
           </main>
         )
       ) : (
-        <main className="flex flex-1 items-center justify-center text-sm text-slate-400">
+        <main className="flex flex-1 items-center justify-center text-sm text-fg-subtle">
           {ready === null ? "連線本機服務中…" : "本機服務未就緒，重試中…"}
         </main>
       )}
@@ -161,7 +170,7 @@ function StatusPill({ ready }: { ready: boolean | null }) {
     ready === null ? "bg-slate-500" : ready ? "bg-brand-accent" : "bg-brand-danger";
   const label = ready === null ? "連線中" : ready ? "服務就緒" : "離線";
   return (
-    <div className="flex items-center gap-2 text-xs text-slate-300">
+    <div className="flex items-center gap-2 text-xs text-fg-muted">
       <span className={`inline-block h-2 w-2 rounded-full ${color}`} />
       {label}
     </div>

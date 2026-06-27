@@ -285,6 +285,43 @@ async function renderPptx(doc: ComposedDoc, fileBase: string): Promise<void> {
   await pptx.writeFile({ fileName: `${fileBase}.pptx` });
 }
 
+// ── CSV ──
+/** CSV 欄位跳脫：含逗號/引號/換行就用雙引號包起來、內部引號加倍。 */
+function csvCell(v: string): string {
+  const s = String(v ?? "");
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** 把 ComposedDoc 攤平成 CSV 文字（heading/段落/條列為兩欄；table 原樣輸出）。 */
+function composedToCsv(doc: ComposedDoc): string {
+  const rows: string[][] = [[doc.title || "會議記錄"]];
+  for (const b of doc.blocks) {
+    if (b.type === "heading") {
+      rows.push([]);
+      rows.push([b.text ?? ""]);
+    } else if (b.type === "paragraph") {
+      (b.text ?? "").split(/\r?\n/).forEach((line) => rows.push(["", line]));
+    } else if (b.type === "bullets") {
+      (b.items ?? []).forEach((it) => rows.push(["", it]));
+    } else if (b.type === "table") {
+      if (b.columns?.length) rows.push(b.columns);
+      (b.rows ?? []).forEach((r) => rows.push(r));
+    } else if (b.type === "chart") {
+      const t = chartToTable(b);
+      rows.push(t.columns);
+      t.rows.forEach((r) => rows.push(r));
+    }
+  }
+  return rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
+
+/** 預設範本匯出 CSV（本機、零 API）。BOM 讓 Excel 開中文不亂碼。 */
+export async function exportCsv(d: ExportData): Promise<void> {
+  const csv = composedToCsv(analysisToComposedDoc(d));
+  // 開頭加 UTF-8 BOM（﻿），Excel 才會以 UTF-8 開啟、中文不亂碼。
+  downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `${baseName(d)}.csv`);
+}
+
 // ── 對外 API ──
 
 /** 渲染一份 ComposedDoc 成指定格式（AI 客製匯出用：doc 來自 sidecar）。 */
