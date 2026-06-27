@@ -2,12 +2,13 @@
 //  GroqLlmService — Groq（OpenAI 相容、LPU 超快、免費額度大）
 //
 //  定位：Gemini 的「後援」。當 Gemini 過載(503)/限流(429) 失敗時接手文字任務
-//  （分析 / 行動方針 / 翻譯 / 聊天）。與 GeminiLlmService 輸出同一組資料形狀。
+//  （分析 / 行動方針 / 翻譯 / 聊天）＋整檔精修（Whisper 轉錄）。與 GeminiLlmService 輸出同形狀。
 //
 //  用 Groq 的 OpenAI 相容 chat/completions：結構化任務用 response_format
 //  json_object（需在 prompt 提到 JSON）。隱私同 Gemini：逐字稿會傳到 Groq。
 //
-//  註：即時逐字稿(Live WS) 與 整檔精修(聽音訊) 是 Gemini 專屬，不在此後援範圍。
+//  註：即時逐字稿(Live WS) 是 Gemini 專屬；整檔精修(聽音訊)現可由本服務的
+//      transcribeAudio（whisper-large-v3）接手（Gemini 失敗時由 server 端切換）。
 // ════════════════════════════════════════════════════════════════════
 
 import {
@@ -21,15 +22,24 @@ import {
 } from "../shared/types";
 import type { LlmService } from "./llm/types";
 import { normalizeComposedDoc } from "./GeminiLlmService";
+import { chunkWavByBytes } from "./wavChunk";
 
 export interface GroqLlmOptions {
   apiKey: string;
   /** 模型，預設 llama-3.3-70b-versatile（品質/中文較佳；可用 GROQ_MODEL 覆寫）。 */
   model?: string;
+  /** 整檔精修後援模型，預設 whisper-large-v3（可用 GROQ_WHISPER_MODEL 覆寫）。 */
+  whisperModel?: string;
 }
 
 const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+const DEFAULT_STT_MODEL = "whisper-large-v3";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
+const GROQ_STT_TRANSLATE_URL = "https://api.groq.com/openai/v1/audio/translations";
+// 單次請求的音檔上限（Groq 免費層約 25MB，留安全邊際）。超過的長錄音由 chunkWavByBytes
+// 切成多段、逐段轉錄、時間戳位移後接起來（16kHz 單聲道下每段約 13 分鐘）。
+const STT_MAX_BYTES = 24 * 1024 * 1024;
 
 /** chat 回應的「後續建議」標記（與 Gemini 端一致）。 */
 const CHAT_SUGGEST_MARKER = "###建議###";
@@ -46,6 +56,26 @@ function languageName(code: string): string {
     case "ko": return "한국어";
     default: return "繁體中文";
   }
+}
+
+/** 秒數 → mm:ss。 */
+function mmss(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Whisper verbose_json 的 segments → `[mm:ss] 發言人: 內容` 逐行（Whisper 無發言人辨識，統一標「發言人」）。
+ * offsetSec：分段轉錄時把本段時間戳位移到整段錄音的絕對位置。
+ */
+export function formatWhisperSegments(segments: { start?: number; text?: string }[], offsetSec = 0): string {
+  return segments
+    .map((s) => {
+      const t = (s.text ?? "").trim();
+      return t ? `[${mmss((s.start ?? 0) + offsetSec)}] 發言人: ${t}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 function toStrArray(v: unknown): string[] {
@@ -101,6 +131,7 @@ function splitChatSuggestions(raw: string): { answer: string; suggestions: strin
 export class GroqLlmService implements LlmService {
   private readonly apiKey: string;
   private readonly model: string;
+  private readonly sttModel: string;
 
   constructor(opts: GroqLlmOptions) {
     if (!opts?.apiKey) {
@@ -108,6 +139,7 @@ export class GroqLlmService implements LlmService {
     }
     this.apiKey = opts.apiKey;
     this.model = opts.model ?? DEFAULT_MODEL;
+    this.sttModel = opts.whisperModel ?? DEFAULT_STT_MODEL;
   }
 
   /** 呼叫 Groq chat/completions。messages 由呼叫端組；json=true 走 json_object 模式。 */
@@ -233,6 +265,76 @@ export class GroqLlmService implements LlmService {
     return parsed.answer ? parsed : { answer: "（沒有產生回覆，請換個方式問問看）", suggestions: [] };
   }
 
+  /**
+   * 整檔精修後援：Groq Whisper（whisper-large-v3，OpenAI 相容、超快）。與 Gemini.transcribeAudio 同簽名。
+   * 輸出 `[mm:ss] 發言人: 內容` 逐行（verbose_json 取 segments 帶時間戳）。
+   * 長錄音（超過單次上限）自動切多段、逐段轉錄、時間戳位移後接起來（涵蓋整堂課等長會議）。
+   * 限制：Whisper 無發言人辨識（統一標「發言人」）；中文可能輸出簡體（zh 時以繁中 prompt + language 盡量導向）；
+   *      分段邊界少數字句可能因切斷略有誤差。lang="en" 走 translations 端點一律翻成英文；其餘走 transcriptions。
+   */
+  async transcribeAudio(
+    audioBase64: string,
+    mimeType: string,
+    lang: "auto" | "zh" | "en" = "auto",
+  ): Promise<string> {
+    const bytes = Buffer.from(audioBase64, "base64");
+    const chunks = chunkWavByBytes(bytes, STT_MAX_BYTES);
+    const parts: string[] = [];
+    // 逐段（依序，保留時間順序、不對 Groq 限流灌爆）。
+    for (const c of chunks) {
+      const mt = chunks.length > 1 ? "audio/wav" : mimeType || "audio/wav";
+      const data = await this.transcribeOne(c.wav, mt, lang);
+      const formatted = formatWhisperSegments(data.segments ?? [], c.startSec);
+      if (formatted) {
+        parts.push(formatted);
+        continue;
+      }
+      // 無 segments（如 translations 端點）：用整段文字，多段時補上本段起始時間戳。
+      const text = (data.text ?? "").trim();
+      if (text) parts.push(chunks.length > 1 ? `[${mmss(c.startSec)}] 發言人: ${text}` : text);
+    }
+    const out = parts.join("\n").trim();
+    if (!out) {
+      throw new AppError(ErrorCode.CLAUDE_API_ERROR, "Groq Whisper 轉錄回應為空（音訊太短或格式不支援）");
+    }
+    return out;
+  }
+
+  /** 單段請求 Groq Whisper，回傳解析後資料（segments/text）。 */
+  private async transcribeOne(
+    wav: Buffer,
+    mimeType: string,
+    lang: "auto" | "zh" | "en",
+  ): Promise<{ text?: string; segments?: { start?: number; text?: string }[] }> {
+    const translate = lang === "en";
+    const url = translate ? GROQ_STT_TRANSLATE_URL : GROQ_STT_URL;
+    // 每次重建 FormData：fetch 會消費 body，重試時需要新的一份。
+    const makeForm = (): FormData => {
+      const form = new FormData();
+      form.append("file", new Blob([wav], { type: mimeType || "audio/wav" }), "audio.wav");
+      form.append("model", this.sttModel);
+      form.append("response_format", "verbose_json"); // 取 segments 以產生時間戳
+      form.append("temperature", "0");
+      if (!translate && lang === "zh") {
+        form.append("language", "zh");
+        form.append("prompt", "以下為繁體中文會議錄音。"); // 盡量導向繁體用字
+      }
+      return form;
+    };
+
+    const resp = await fetchGroqSttWithRetry(url, this.apiKey, makeForm);
+    const data = (await resp.json().catch(() => null)) as
+      | { text?: string; segments?: { start?: number; text?: string }[]; error?: { message?: string } }
+      | null;
+    if (!resp.ok) {
+      throw new AppError(
+        ErrorCode.CLAUDE_API_ERROR,
+        `Groq Whisper 轉錄錯誤：${data?.error?.message ?? `HTTP ${resp.status}`}`,
+      );
+    }
+    return data ?? {};
+  }
+
   /** AI 客製匯出（與 GeminiLlmService.composeExportDoc 同行為；共用 normalizeComposedDoc 解析）。 */
   async composeExportDoc(req: ComposeExportRequest): Promise<ComposedDoc> {
     const a = req.analysis;
@@ -293,6 +395,25 @@ async function fetchGroqWithRetry(apiKey: string, body: unknown, retries = 2): P
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
+    });
+    if (!transient.has(resp.status) || attempt >= retries) return resp;
+    await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+  }
+}
+
+/** Groq Whisper 轉錄：multipart 上傳，對 5xx/429 短退避重試（每次重建 FormData 以免 body 已被消費）。 */
+async function fetchGroqSttWithRetry(
+  url: string,
+  apiKey: string,
+  makeForm: () => FormData,
+  retries = 2,
+): Promise<Response> {
+  const transient = new Set([429, 500, 502, 503, 504]);
+  for (let attempt = 0; ; attempt++) {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` }, // 不手動設 Content-Type，讓 fetch 自帶 multipart boundary
+      body: makeForm(),
     });
     if (!transient.has(resp.status) || attempt >= retries) return resp;
     await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));

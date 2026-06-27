@@ -1,7 +1,8 @@
 // ── FallbackLlmService — 主力 + 後援 ──
 // 文字任務先打主力（Gemini，顧繁中品質）；主力丟錯（過載 503 / 限流 429 / 空回應等）
 // 就自動改打後援（Groq，快、額度大）。後援也失敗才把錯誤往上拋。
-// 涵蓋：分析 / 行動方針 / 翻譯 / 合併分析 / 聊天。（整檔精修與 Live 為 Gemini 專屬，不在此。）
+// 涵蓋：分析 / 行動方針 / 翻譯 / 合併分析 / 聊天。
+// （整檔精修改由 server 層 transcribeWithFallback 走 Groq Whisper 後援；即時逐字稿 Live 仍 Gemini 專屬。）
 
 import type {
   ProactiveAnalysis,

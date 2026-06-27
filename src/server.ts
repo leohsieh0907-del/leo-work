@@ -124,10 +124,15 @@ const geminiStt = process.env.GEMINI_API_KEY
   ? new GeminiLlmService({ apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_MODEL })
   : null;
 
-// Groq 後援（OpenAI 相容、LPU 快、免費額度大）：Gemini 過載(503)/限流(429) 時自動接手「文字任務」。
-// 即時逐字稿(Live)與整檔精修(聽音訊)為 Gemini 專屬，不在後援範圍。
+// Groq 後援（OpenAI 相容、LPU 快、免費額度大）：Gemini 過載(503)/限流(429) 時自動接手。
+// 文字任務（分析/翻譯/聊天）走 FallbackLlmService；整檔精修走下方 transcribeWithFallback（Groq Whisper）。
+// 即時逐字稿(Live WS) 仍為 Gemini 專屬，不在後援範圍。
 const groq = process.env.GROQ_API_KEY
-  ? new GroqLlmService({ apiKey: process.env.GROQ_API_KEY, model: process.env.GROQ_MODEL })
+  ? new GroqLlmService({
+      apiKey: process.env.GROQ_API_KEY,
+      model: process.env.GROQ_MODEL,
+      whisperModel: process.env.GROQ_WHISPER_MODEL,
+    })
   : null;
 // 分析/翻譯：主力 llm 是 Gemini 時，包一層 Groq 後援。
 if (groq && llm instanceof GeminiLlmService) {
@@ -135,6 +140,27 @@ if (groq && llm instanceof GeminiLlmService) {
 }
 // 文字 AI（聊天 + 客製匯出）：geminiStt 為主、groq 為援（無 groq 則退回純 geminiStt）。
 const textAi = geminiStt && groq ? new FallbackLlmService(geminiStt, groq) : geminiStt;
+
+// 整檔精修（聽音訊）：Gemini 主力（繁體/發言人/時間戳品質最佳）→ 失敗自動改 Groq Whisper 後援。
+async function transcribeWithFallback(
+  audioBase64: string,
+  mimeType: string,
+  lang: TranscribeLang,
+): Promise<string> {
+  if (geminiStt) {
+    try {
+      return await geminiStt.transcribeAudio(audioBase64, mimeType, lang);
+    } catch (e) {
+      if (!groq) throw e;
+      console.warn(
+        `[fallback] 整檔精修主力(Gemini)失敗，改用 Groq Whisper：${e instanceof Error ? e.message : String(e)}`,
+      );
+      return await groq.transcribeAudio(audioBase64, mimeType, lang);
+    }
+  }
+  if (groq) return await groq.transcribeAudio(audioBase64, mimeType, lang);
+  throw new AppError(ErrorCode.CONFIG_MISSING, "整檔精修需要 GEMINI_API_KEY 或 GROQ_API_KEY");
+}
 
 // ─────────────── 雙源收音引擎 ───────────────
 
@@ -375,10 +401,7 @@ app.post(
       lang?: TranscribeLang;
     };
     if (!audio) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 audio（base64）");
-    if (!geminiStt) {
-      throw new AppError(ErrorCode.CONFIG_MISSING, "語音轉錄需要 GEMINI_API_KEY，請於 .env 設定");
-    }
-    const transcript = await geminiStt.transcribeAudio(audio, mimeType ?? "audio/wav", lang ?? "auto");
+    const transcript = await transcribeWithFallback(audio, mimeType ?? "audio/wav", lang ?? "auto");
     res.json({ transcript });
   }),
 );
@@ -575,18 +598,11 @@ app.post(
   "/router/transcribe",
   wrap(async (req, res) => {
     const { lang } = req.body as { lang?: TranscribeLang };
-    if (!geminiStt) {
-      throw new AppError(ErrorCode.CONFIG_MISSING, "整檔精修需要 GEMINI_API_KEY，請於 .env 設定");
-    }
     const wav = audioRouter.peekRecordingWav();
     if (!wav) {
       throw new AppError(ErrorCode.INVALID_INPUT, "沒有可精修的收音（請先用手機/電腦收音並按停止）");
     }
-    const transcript = await geminiStt.transcribeAudio(
-      wav.toString("base64"),
-      "audio/wav",
-      lang ?? "auto",
-    );
+    const transcript = await transcribeWithFallback(wav.toString("base64"), "audio/wav", lang ?? "auto");
     // 只有精修成功才清空緩衝；失敗（限流/斷網）保留錄音讓使用者重試。
     audioRouter.clearRecording();
     res.json({ transcript });
