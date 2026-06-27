@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-06-27 — v0.1.16：整檔精修加 Groq Whisper 後援（Gemini 限流時自動接手＋長錄音分段）
+
+### ✅ 做了什麼
+- **起因**：庭晰錄「EMBA會計課程」時整檔精修＋分析都噴「Gemini 免費額度暫時用盡」，問「不是有加 Groq？」。
+- **根因（實測 `/config`）**：① 打包版 `hasGroqKey:false`——打包版讀 app 資料夾 `config.json`、**不讀 dev 的 .env**，從沒填過 Groq 金鑰 → `FallbackLlmService` 沒掛上（問題 A）。② 整檔精修是 `transcribeAudio`（Gemini 專屬），`FallbackLlmService` 設計上**不接轉錄**（問題 B）。
+- **問題 A（設定，不用發版）**：庭晰在打包版 ⚙️ 設定填 Groq 金鑰重啟 → `/config` 變 `hasGroqKey:true`，分析/聊天/翻譯後援即生效。
+- **問題 B（程式，v0.1.16）**：
+  - `GroqLlmService.transcribeAudio`（Groq Whisper `whisper-large-v3`，OpenAI 相容 `/audio/transcriptions`，`verbose_json`→`[mm:ss] 發言人:`）。
+  - `server.ts` `transcribeWithFallback`：`/transcribe`、`/router/transcribe` 在 **Gemini 轉錄失敗時自動切 Groq Whisper**（server 層 helper，非走 FallbackLlmService）。
+  - **長錄音分段**：新 `src/services/wavChunk.ts`（`parseWavPcm`/`wrapPcmAsWav`/`chunkWavByBytes`）把 >24MB 的 WAV 切多段（16kHz 單聲道≈13 分/段）、逐段轉錄、時間戳位移後接合 → 整堂課(1~3hr)也能後援。
+  - env 新增 `GROQ_WHISPER_MODEL`（預設 whisper-large-v3）。
+
+### 驗證結果
+- typecheck（兩 tsconfig exit 0）＋ **vitest 107/107**（新增 wavChunk 5 項＋格式化 4 項）＋ vite build。
+- 真 API 端到端（Gemini TTS 合成中文→Groq Whisper）：**單段**（繁體、含時間戳、~1s）＋**多段**（25MB→2 段、第二段時間戳正確位移、無 reset 回 00:xx）皆過。
+- `/code-review`（medium）：唯一重要發現＝Groq 免費層 25MB≈13 分上限 → 已用分段解掉。
+
+### 發版 / 限制 / 備份
+- v0.1.16：push main+tag → CI 打包（~13 分）→ 草稿 6 產物 → `latest.json` 穩定 tag 網址驗證 → 發佈 → **匿名 OTA 驗證通過**（latest.json 回 0.1.16、exe 302→200）。OTA 已上線，打包版重開即跳更新。
+- 限制：Whisper 無發言人辨識（統一「發言人」）、中文可能簡體、分段邊界少數字句可能誤差；Gemini 主力品質仍較佳，Groq 僅過載時接手。
+- 備份：`D:\Leo work_備份_2026-06-27`（**不含 .env 金鑰**、排除 node_modules/build/本地加密資料，含 .git，1.4MB）。
+
 ## 2026-06-27 — 發 v0.1.14 + v0.1.15（版本顯示／亮暗主題／改名／CSV／匯入音檔／錄音回原場／發言人改名）
 
 ### ✅ 做了什麼（依版本）
