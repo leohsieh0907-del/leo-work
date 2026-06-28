@@ -86,7 +86,7 @@ export default function Workspace() {
   const [meetingId, setMeetingId] = useState(newMeetingId);
   const [meetingTitle, setMeetingTitle] = useState(defaultMeetingId);
   const [meetingDate, setMeetingDate] = useState(defaultMeetingDate);
-  const [micBusy, setMicBusy] = useState(false); // 逐字稿區錄音/轉錄/匯入中
+  const [micBusy, setMicBusy] = useState(false); // 逐字稿區匯入音檔轉錄中（錄音已移到頂部收音列）
   const lastPersistedRef = useRef(""); // 上次存檔/載入時的逐字稿，用來判斷是否有未存變更
   // 錄音工作階段：綁定「開始錄音/匯入時的那場會議」，停止後逐字稿自動寫回原場（即使中途切去看別場）。
   const recordingOriginRef = useRef<SavedMeeting | null>(null);

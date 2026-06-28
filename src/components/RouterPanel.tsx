@@ -13,7 +13,8 @@ const STATE_LABEL: Record<AudioSourceState, string> = {
   [AudioSourceState.DISCONNECTED]: "未連線",
   [AudioSourceState.BLUETOOTH_SYNCING]: "藍牙同步中",
   [AudioSourceState.WEBRTC_STREAMING]: "手機收音中",
-  [AudioSourceState.LOCAL_RECORDING]: "本機錄音中",
+  [AudioSourceState.LOCAL_RECORDING]: "電腦系統錄音中",
+  [AudioSourceState.MIC_RECORDING]: "麥克風錄音中",
 };
 
 const STATE_COLOR: Record<AudioSourceState, string> = {
@@ -21,16 +22,22 @@ const STATE_COLOR: Record<AudioSourceState, string> = {
   [AudioSourceState.BLUETOOTH_SYNCING]: "bg-blue-500",
   [AudioSourceState.WEBRTC_STREAMING]: "bg-brand-accent",
   [AudioSourceState.LOCAL_RECORDING]: "bg-brand",
+  [AudioSourceState.MIC_RECORDING]: "bg-emerald-500",
 };
 
 const SOURCES: { id: AudioSourceId; label: string }[] = [
+  { id: "mic", label: "🎙 麥克風" },
   { id: "local", label: "🖥️ 電腦系統" },
   { id: "webrtc", label: "📱 手機收音" },
   { id: "bluetooth", label: "🔵 藍牙同步" },
 ];
 
 function isRealtime(state: AudioSourceState): boolean {
-  return state === AudioSourceState.WEBRTC_STREAMING || state === AudioSourceState.LOCAL_RECORDING;
+  return (
+    state === AudioSourceState.WEBRTC_STREAMING ||
+    state === AudioSourceState.LOCAL_RECORDING ||
+    state === AudioSourceState.MIC_RECORDING
+  );
 }
 
 /** 精簡控制列：狀態燈 + 來源切換 + 停止 + VU。放在頂部 header。 */

@@ -76,6 +76,8 @@ export interface AudioRouterDeps {
   bluetooth: AudioSource;
   webrtc: AudioSource;
   local: AudioSource;
+  /** 只麥克風來源（面對面會議）；與 local/webrtc 同為前景即時源、三者互斥。 */
+  mic: AudioSource;
   agc: Agc;
   transcriber?: TranscriberLike;
   onEvent?: (e: AudioEvent) => void;
@@ -121,6 +123,7 @@ export class AudioIngestionRouter {
     // 屬於目前前景源——避免在每次 activate/deactivate 重新註冊造成回呼疊加。
     this.wire(deps.webrtc);
     this.wire(deps.local);
+    this.wire(deps.mic);
     this.wire(deps.bluetooth);
   }
 
@@ -187,7 +190,8 @@ export class AudioIngestionRouter {
    * （前景即時串流不能被檔案傳輸搶資源）。
    */
   private async activateRealtimeLocked(id: AudioSourceId): Promise<void> {
-    const target = id === "webrtc" ? this.deps.webrtc : this.deps.local;
+    const target =
+      id === "webrtc" ? this.deps.webrtc : id === "mic" ? this.deps.mic : this.deps.local;
 
     // 已是同一個前景源在跑：視為冪等，僅重發狀態。
     if (this.foregroundId === id && this.foregroundSource === target) {
@@ -449,6 +453,7 @@ export class AudioIngestionRouter {
   private computeState(): AudioSourceState {
     if (this.foregroundId === "webrtc") return AudioSourceState.WEBRTC_STREAMING;
     if (this.foregroundId === "local") return AudioSourceState.LOCAL_RECORDING;
+    if (this.foregroundId === "mic") return AudioSourceState.MIC_RECORDING;
     // 無即時前景：藍牙在傳 → BLUETOOTH_SYNCING；否則 DISCONNECTED。
     if (this.bluetoothTransferring) return AudioSourceState.BLUETOOTH_SYNCING;
     return AudioSourceState.DISCONNECTED;

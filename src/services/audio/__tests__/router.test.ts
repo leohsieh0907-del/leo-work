@@ -132,6 +132,7 @@ function makeHarness() {
   const bluetooth = new FakeSource("bluetooth");
   const webrtc = new FakeSource("webrtc");
   const local = new FakeSource("local");
+  const mic = new FakeSource("mic");
   const transcriber = new FakeTranscriber();
   const events: AudioEvent[] = [];
 
@@ -139,12 +140,13 @@ function makeHarness() {
     bluetooth,
     webrtc,
     local,
+    mic,
     agc: new Agc(),
     transcriber: transcriber as unknown as never,
     onEvent: (e) => events.push(e),
   };
   const router = new AudioIngestionRouter(deps);
-  return { router, bluetooth, webrtc, local, transcriber, events };
+  return { router, bluetooth, webrtc, local, mic, transcriber, events };
 }
 
 // ════════════════ 1) activate("webrtc") ════════════════
@@ -175,6 +177,27 @@ describe("activate(webrtc)", () => {
     expect(local.startCalls).toBe(1);
     expect(router.status().state).toBe(AudioSourceState.LOCAL_RECORDING);
     expect(router.status().activeSourceId).toBe("local");
+  });
+
+  it("activate(mic) → state=MIC_RECORDING", async () => {
+    const { router, mic } = makeHarness();
+    await router.activate("mic");
+    expect(mic.startCalls).toBe(1);
+    expect(router.status().state).toBe(AudioSourceState.MIC_RECORDING);
+    expect(router.status().activeSourceId).toBe("mic");
+  });
+
+  it("mic 與 local 互斥：activate(mic) 後 activate(local) 先停 mic 再起 local", async () => {
+    const { router, mic, local } = makeHarness();
+    await router.activate("mic");
+    await router.activate("local");
+    expect(mic.stopCalls).toBe(1);
+    expect(local.startCalls).toBe(1);
+    expect(router.status().state).toBe(AudioSourceState.LOCAL_RECORDING);
+    const stopIdx = FakeSource.order.indexOf("mic:stop");
+    const startIdx = FakeSource.order.indexOf("local:start");
+    expect(stopIdx).toBeGreaterThanOrEqual(0);
+    expect(startIdx).toBeGreaterThan(stopIdx);
   });
 
   it("起串流失敗 → 回滾前景指標，狀態不留半啟用髒值、發 error 事件", async () => {

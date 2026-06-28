@@ -21,7 +21,6 @@ import { VectorStore } from "./services/VectorStore";
 import { ClaudeService } from "./services/ClaudeService";
 import { OllamaLlmService } from "./services/OllamaLlmService";
 import { GeminiLlmService } from "./services/GeminiLlmService";
-import { GeminiLiveService } from "./services/GeminiLiveService";
 import { GroqLlmService } from "./services/GroqLlmService";
 import { FallbackLlmService } from "./services/FallbackLlmService";
 import type { LlmService } from "./services/llm/types";
@@ -176,6 +175,8 @@ function broadcast(event: AudioEvent): void {
 // .env SYSTEM_LOOPBACK_DEVICE 可指定系統收音的 loopback 裝置（完整名稱或片段，如 "Voicemeeter Out B1"）；
 // 未設定時 pickLoopback 會自動偏好 VoiceMeeter B1 > CABLE > 任一 VoiceMeeter > 立體聲混音。
 const systemCapture = new SystemAudioCapture({ loopbackDevice: process.env.SYSTEM_LOOPBACK_DEVICE });
+// 只麥克風來源（面對面會議；不混系統 loopback）。獨立 ffmpeg 實例，與「電腦系統」互斥不衝突。
+const micCapture = new SystemAudioCapture({ micOnly: true });
 const phoneBridge = new PhoneBridgeServer({ port: PHONE_PORT });
 const transcriber = new StreamingTranscriber({
   modelPath: process.env.WHISPER_MODEL_PATH,
@@ -215,6 +216,10 @@ const bluetoothSource = new BluetoothHardwareSource({
 // 本機系統混音包成統一 AudioSource（LOCAL_RECORDING）
 const localSource = new CaptureSourceAdapter(systemCapture, "local");
 
+// 只麥克風包成統一 AudioSource（MIC_RECORDING）：原「逐字稿區🎙錄音」的瀏覽器 getUserMedia
+// 已收斂到這條 router 來源，與電腦系統/手機/藍牙共用同一狀態機、即時轉寫與 /router/transcribe 精修。
+const micSource = new CaptureSourceAdapter(micCapture, "mic");
+
 // 「手機收音」來源：重用已驗證的 WSS 手機橋接（PhoneBridgeServer，自簽 HTTPS+QR+token），
 // 以 CaptureSourceAdapter 包成 router 的即時源（沿用既有 sourceId "webrtc" 欄位）。
 // WebRtcSoftwareSource 仍保留並掛在 /webrtc 信令路由，作為未來「真 WebRTC」的備援接點。
@@ -235,6 +240,7 @@ const audioRouter = new AudioIngestionRouter({
   bluetooth: bluetoothSource,
   webrtc: phoneSource,
   local: localSource,
+  mic: micSource,
   agc: new Agc(),
   transcriber: routerTranscriber,
   onEvent: broadcast,
@@ -561,8 +567,13 @@ app.post(
   "/router/activate",
   wrap(async (req, res) => {
     const { sourceId } = req.body as { sourceId: AudioSourceId };
-    if (sourceId !== "bluetooth" && sourceId !== "webrtc" && sourceId !== "local") {
-      throw new AppError(ErrorCode.INVALID_INPUT, "sourceId 必須是 bluetooth / webrtc / local");
+    if (
+      sourceId !== "bluetooth" &&
+      sourceId !== "webrtc" &&
+      sourceId !== "local" &&
+      sourceId !== "mic"
+    ) {
+      throw new AppError(ErrorCode.INVALID_INPUT, "sourceId 必須是 bluetooth / webrtc / local / mic");
     }
     await audioRouter.activate(sourceId);
     res.json({ status: audioRouter.status() });
@@ -670,64 +681,33 @@ async function main() {
 
   const server = http.createServer(app);
 
-  // 兩條 WebSocket 共用同一 http server，必須用 noServer + 手動依路徑分流；
-  // 否則兩個 WebSocketServer 各自掛 upgrade 監聽，不符路徑的那個會 abortHandshake 把
-  // 對方的連線砍掉（ws 的已知坑）。
+  // 單一 WebSocket（/events）：前端訂閱 VU 訊號 / 路由狀態 / 即時逐字稿 / 收音可精修事件。
+  // 用 noServer + 手動 upgrade，只放行 /events，其餘路徑直接斷線。
+  // （即時逐字稿原本另有 /live WS，已隨「麥克風收音收斂進 router」移除——即時稿改由 router
+  //   的 GeminiStreamingTranscriber 經 /events 的 transcript 事件統一推送，避免兩條 Gemini Live 並發。）
   const eventsWss = new WebSocketServer({ noServer: true });
-  const liveWss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (req, socket, head) => {
     const pathname = (req.url ?? "").split("?")[0];
     if (pathname === "/events") {
       eventsWss.handleUpgrade(req, socket, head, (ws) => eventsWss.emit("connection", ws, req));
-    } else if (pathname === "/live") {
-      liveWss.handleUpgrade(req, socket, head, (ws) => liveWss.emit("connection", ws, req));
     } else {
       socket.destroy();
     }
   });
 
-  // 前端訂閱即時事件（VU 訊號條 / 引擎狀態 / 即時逐字稿）的 WebSocket
+  // 前端訂閱即時事件（VU 訊號條 / 路由狀態 / 即時逐字稿 / 收音可精修）的 WebSocket
   eventsWss.on("connection", (ws) => {
     eventClients.add(ws);
-    // 一連上先推一次目前狀態
-    ws.send(JSON.stringify({ type: "status", status: audioEngine.status() } satisfies AudioEvent));
+    // 一連上先推一次目前路由狀態（讓前端 store 立即反映四態機）
+    ws.send(JSON.stringify({ type: "router", status: audioRouter.status() } satisfies AudioEvent));
     ws.on("close", () => eventClients.delete(ws));
     ws.on("error", () => eventClients.delete(ws));
-  });
-
-  // 即時逐字稿（混合式）：瀏覽器串流 16kHz PCM → 本服務轉接 Gemini Live → 回傳 inputTranscription。
-  // 停止錄音後，前端仍會用 /transcribe 對整檔做一次精修轉錄覆蓋這份粗稿。
-  liveWss.on("connection", (ws) => {
-    if (!process.env.GEMINI_API_KEY) {
-      ws.send(JSON.stringify({ type: "error", message: "即時逐字稿需要 GEMINI_API_KEY" }));
-      ws.close();
-      return;
-    }
-    const live = new GeminiLiveService({
-      apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_LIVE_MODEL,
-    });
-    live.start(
-      (text) => {
-        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "text", text }));
-      },
-      (message) => {
-        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "error", message }));
-      },
-    );
-    ws.on("message", (data, isBinary) => {
-      // 二進位幀 = Int16LE PCM @16kHz；轉 base64 後餵給 Gemini Live
-      if (isBinary) live.pushAudio((data as Buffer).toString("base64"));
-    });
-    ws.on("close", () => live.stop());
-    ws.on("error", () => live.stop());
   });
 
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`[sidecar] 已啟動於 http://127.0.0.1:${PORT}（嵌入來源：${EMBED_PROVIDER}）`);
     console.log(`[sidecar] 事件 WebSocket：ws://127.0.0.1:${PORT}/events`);
-    console.log(`[sidecar] 即時逐字稿 WebSocket：ws://127.0.0.1:${PORT}/live`);
   });
 }
 

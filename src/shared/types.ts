@@ -293,16 +293,18 @@ export interface AudioDeviceList {
 
 // ════════════════ 雙軌路由（AudioIngestionRouter）跨邊界 DTO ════════════════
 
-/** 雙軌引擎四態狀態機。 */
+/** 雙軌引擎狀態機（前景即時源互斥 + 藍牙背景）。 */
 export enum AudioSourceState {
   DISCONNECTED = "DISCONNECTED",
   BLUETOOTH_SYNCING = "BLUETOOTH_SYNCING",
   WEBRTC_STREAMING = "WEBRTC_STREAMING",
   LOCAL_RECORDING = "LOCAL_RECORDING",
+  /** 只錄麥克風（面對面會議；不混系統 loopback）。 */
+  MIC_RECORDING = "MIC_RECORDING",
 }
 
-/** 音訊來源識別。 */
-export type AudioSourceId = "bluetooth" | "webrtc" | "local";
+/** 音訊來源識別。mic＝只麥克風、local＝麥克風+系統喇叭混音、webrtc＝手機、bluetooth＝錄音卡。 */
+export type AudioSourceId = "bluetooth" | "webrtc" | "local" | "mic";
 
 /** 來源優先級（WebRTC 即時串流時，藍牙傳輸降為背景低優先）。 */
 export type SourcePriority = "foreground" | "background";

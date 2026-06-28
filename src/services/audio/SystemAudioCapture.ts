@@ -54,12 +54,18 @@ export interface SystemCaptureOptions {
   loopbackDevice?: string;
   /** 取樣率；預設 16000（對接 Whisper）。 */
   sampleRate?: number;
+  /**
+   * 只錄麥克風（面對面會議）：略過 loopback 偵測與混音，且不發「未偵測到 loopback」警告
+   * （那在此模式是刻意的，不是降級失敗）。用於 router 的 "mic" 來源。
+   */
+  micOnly?: boolean;
 }
 
 export class SystemAudioCapture implements CaptureSource {
   private readonly micDevice?: string;
   private readonly loopbackDevice?: string;
   private readonly sampleRate: number;
+  private readonly micOnly: boolean;
 
   /** 目前的 ffmpeg 子行程；未錄音時為 null。 */
   private proc: ChildProcessWithoutNullStreams | null = null;
@@ -80,6 +86,7 @@ export class SystemAudioCapture implements CaptureSource {
     this.micDevice = opts.micDevice;
     this.loopbackDevice = opts.loopbackDevice;
     this.sampleRate = opts.sampleRate ?? TARGET_SAMPLE_RATE;
+    this.micOnly = opts.micOnly ?? false;
   }
 
   /**
@@ -149,10 +156,12 @@ export class SystemAudioCapture implements CaptureSource {
     if (!mic) {
       throw new AppError(ErrorCode.IO_ERROR, "找不到任何音訊輸入裝置");
     }
-    const loopback = this.pickLoopback(devices);
+    // micOnly：刻意不抓 loopback（只錄麥克風）；否則自動挑 loopback 做雙軌混音。
+    const loopback = this.micOnly ? undefined : this.pickLoopback(devices);
 
-    if (!loopback) {
-      // 退化：只錄麥克風，並提示（不可整個失敗）
+    if (!loopback && !this.micOnly) {
+      // 退化：「電腦系統」模式偵測不到 loopback → 只錄麥克風，並提示（不可整個失敗）。
+      // micOnly 模式本就只錄麥克風，不發此警告（不是降級失敗）。
       const msg = "未偵測到系統 loopback，僅錄麥克風";
       console.warn(`[SystemAudioCapture] ${msg}`);
       try {
