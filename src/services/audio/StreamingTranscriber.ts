@@ -51,7 +51,7 @@ interface WhisperJson {
 export class StreamingTranscriber {
   private readonly modelPath?: string;
   private readonly whisperBin?: string;
-  /** 視窗長度（秒）；公開供上層引擎決定 flush 週期（AudioCaptureEngine 會讀此值）。 */
+  /** 視窗長度（秒）；公開供上層 AudioIngestionRouter 決定 flush 週期。 */
   readonly windowSec: number;
   private readonly sampleRate = TARGET_SAMPLE_RATE;
 

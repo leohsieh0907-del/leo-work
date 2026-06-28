@@ -171,7 +171,7 @@ export class AudioIngestionRouter {
     });
   }
 
-  /** 組目前整體狀態快照（供 /audio/status 與前端輪詢）。 */
+  /** 組目前整體狀態快照（供 /router/status 與前端 /events 推播）。 */
   status(): RouterStatus {
     return {
       state: this.computeState(),

@@ -1,12 +1,8 @@
-// ── 雙源收音：前端 → sidecar 的 HTTP 控制 + /events WebSocket 訂閱 ──
+// ── 雙源收音：前端 → sidecar 的 HTTP 查詢 + /events WebSocket 訂閱 ──
+// 收音控制（開始/停止/切換來源）走 audioRouterApi.ts 的 /router/*；本檔只保留
+// 「列舉裝置」「取手機連線資訊」與「訂閱即時事件」。
 
-import type {
-  AudioDeviceList,
-  AudioEngineStatus,
-  AudioEvent,
-  AudioSourceKind,
-  PhoneSession,
-} from "../shared/types";
+import type { AudioDeviceList, AudioEvent, PhoneSession } from "../shared/types";
 
 const BASE = "http://127.0.0.1:8765";
 const WS_URL = "ws://127.0.0.1:8765/events";
@@ -14,18 +10,6 @@ const WS_URL = "ws://127.0.0.1:8765/events";
 async function jsonGet<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`);
   if (!r.ok) throw new Error(`服務錯誤（${r.status}）`);
-  return (await r.json()) as T;
-}
-async function jsonPost<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) {
-    const e = (await r.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(e?.error?.message ?? `服務錯誤（${r.status}）`);
-  }
   return (await r.json()) as T;
 }
 
@@ -39,23 +23,8 @@ export function getPhoneSession(): Promise<PhoneSession> {
   return jsonGet("/audio/session");
 }
 
-/** 開始收音。 */
-export function startAudio(source: AudioSourceKind): Promise<{ status: AudioEngineStatus }> {
-  return jsonPost("/audio/start", { source });
-}
-
-/** 停止收音。 */
-export function stopAudio(): Promise<{ status: AudioEngineStatus }> {
-  return jsonPost("/audio/stop", {});
-}
-
-/** 查詢引擎狀態。 */
-export function getAudioStatus(): Promise<{ status: AudioEngineStatus }> {
-  return jsonGet("/audio/status");
-}
-
 /**
- * 訂閱即時事件（VU 訊號 / 狀態 / 即時逐字稿）。
+ * 訂閱即時事件（VU 訊號 / 路由狀態 / 即時逐字稿 / 收音可精修）。
  * 回傳一個取消訂閱函式；自動斷線重連。
  */
 export function subscribeAudioEvents(onEvent: (e: AudioEvent) => void): () => void {

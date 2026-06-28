@@ -29,7 +29,6 @@ import { PhoneBridgeServer } from "./services/audio/PhoneBridgeServer";
 import { Agc } from "./services/audio/Agc";
 import { StreamingTranscriber } from "./services/audio/StreamingTranscriber";
 import { GeminiStreamingTranscriber } from "./services/audio/GeminiStreamingTranscriber";
-import { AudioCaptureEngine } from "./services/audio/AudioCaptureEngine";
 import { WebRtcSoftwareSource } from "./services/audio/WebRtcSoftwareSource";
 import { BluetoothHardwareSource } from "./services/audio/BluetoothHardwareSource";
 import { NobleBleTransport } from "./services/audio/NobleBleTransport";
@@ -37,7 +36,6 @@ import { CaptureSourceAdapter } from "./services/audio/CaptureSourceAdapter";
 import { AudioIngestionRouter } from "./services/audio/AudioIngestionRouter";
 import type {
   AudioEvent,
-  AudioSourceKind,
   AudioSourceId,
   TranscriberLike,
 } from "./services/audio/types";
@@ -181,13 +179,6 @@ const phoneBridge = new PhoneBridgeServer({ port: PHONE_PORT });
 const transcriber = new StreamingTranscriber({
   modelPath: process.env.WHISPER_MODEL_PATH,
   whisperBin: process.env.WHISPER_BIN,
-});
-const audioEngine = new AudioCaptureEngine({
-  system: systemCapture,
-  phone: phoneBridge,
-  agc: new Agc(),
-  transcriber,
-  onEvent: broadcast, // 引擎把 vu/status/transcript 事件推給所有前端訂閱者
 });
 
 // ─────────────── 雙軌整合引擎（AudioIngestionRouter）───────────────
@@ -524,41 +515,15 @@ app.get(
   }),
 );
 
-// 取得手機連線 QR / token / 網址（會啟動 WSS 橋接伺服器）
+// 取得手機連線 QR / token / 網址（會啟動 WSS 橋接伺服器）。
+// 收音實際由 audioRouter 的 webrtc 來源（phoneSource）驅動；這裡只取手機橋接的連線資訊。
 app.get(
   "/audio/session",
   wrap(async (_req, res) => {
-    const session = await audioEngine.getPhoneSession();
+    const session = await phoneBridge.getSession();
     res.json(session);
   }),
 );
-
-// 開始收音；source = "computer" | "phone"
-app.post(
-  "/audio/start",
-  wrap(async (req, res) => {
-    const { source } = req.body as { source: AudioSourceKind };
-    if (source !== "computer" && source !== "phone") {
-      throw new AppError(ErrorCode.INVALID_INPUT, "source 必須是 computer 或 phone");
-    }
-    await audioEngine.start(source);
-    res.json({ status: audioEngine.status() });
-  }),
-);
-
-// 停止收音
-app.post(
-  "/audio/stop",
-  wrap(async (_req, res) => {
-    await audioEngine.stop();
-    res.json({ status: audioEngine.status() });
-  }),
-);
-
-// 目前引擎狀態
-app.get("/audio/status", (_req, res) => {
-  res.json({ status: audioEngine.status() });
-});
 
 // ─────────────── 雙軌路由（AudioIngestionRouter）路由 ───────────────
 
