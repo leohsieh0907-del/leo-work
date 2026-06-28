@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-06-27（續）— v0.1.16 OTA 發佈 + 錄音 UX 修正 + 手機收音排查 + 無金鑰備份
+
+### ✅ 做了什麼
+- **v0.1.16 OTA 發佈完成、已安裝**：push tag → CI → 草稿 6 產物 → `latest.json` 穩定網址驗證 → 發佈 → 匿名 OTA 驗證通過（exe 302→200）。庭晰已 OTA 更新到 v0.1.16。
+- **問題 A（分析/聊天/翻譯後援）已生效**：庭晰在打包版 ⚙️ 設定填 Groq 金鑰並重啟，`/config` 回 `hasGroqKey:true`。
+- **錄音 UX 修正（commit `81791de`，已 push main，未發版 → 待 v0.1.17 進打包版）**：
+  1. `RouterBar`（RouterPanel.tsx）「電腦系統/手機」即時源錄音時，**停止鈕旁顯示 `mm:ss` 計時器**（UI setInterval 計數；`recordingSeconds` 只在停止後帶 seconds、非即時跳，故用 UI 計數）。
+  2. `Workspace.tsx`：**錄音中 AI 助理面板自動讓出空間**（`effectiveChatOpen = chatOpen && !captureActive`），解「錄音時下方逐字稿區被 chat(320px)+頂部即時稿條擠到看不見」；停止後自動恢復原本展開狀態。
+
+### 🕳️ 手機收音（手機當無線麥克風）連不上——完整排查結論（耗時，未來別重查）
+症狀：iPhone 掃 QR / 開 `https://192.168.0.105:8443/m` →「Safari 無法連接伺服器」。PC 端全正常（8765 up、8443 listen 0.0.0.0、QR 指向對的 192.168.0.105、`detectLanIp` 這次抓對）。**有兩道牆，要兩個都解才會通**：
+1. **McAfee 隱藏防火牆 `mc-fw-host`**（`C:\Program Files\McAfee\wps\...\mc-fw-host.exe`，註冊為 SecurityCenter FirewallProduct；GUI 只有「McAfee Security Scan Plus」掃描器、**沒有防火牆開關**）。它在跑時：PC 連自己 LAN IP 的 8443/8765 都 False（loopback True）；它停掉後立刻變 True。**StartType=Automatic，重開機會回來**。Windows 防火牆已加 `Leo work phone 8443`(TCP/8443 Inbound Allow Any) 但被 McAfee 蓋過、無效。永久解：系管 PowerShell `Stop-Service mc-fw-host -Force; Set-Service mc-fw-host -StartupType Disabled`，或移除 McAfee WebAdvisor。
+2. **路由器 AP 隔離（用戶端隔離）**：McAfee 停掉、PC 自連 8443=True 後，手機仍連不到。PC `ping 192.168.0.1`(路由器)=True、`ping 192.168.0.182`(iPhone)=False，但 iPhone 在 ARP 表（d2-d4-…，iOS 隨機 MAC）→ 廣播通、單播被擋 = 典型 AP 隔離。需登入路由器(192.168.0.1)關「AP 隔離/Client Isolation」，或別連訪客網路。
+- **結論/建議**：主場景錄線上課用「**電腦系統**」即可（FFmpeg amix 已同時收麥克風+系統喇叭，兩邊聲音都有），手機收音是備援；要硬通需同時破上述兩道牆。
+
+### 📦 無金鑰可還原備份
+- `D:\Leo work_備份_2026-06-27`：純原始碼（去 `.git`、去 `.env`，排除 node_modules/build/本地加密資料，~1.5MB）＋ `給CLAUDE的還原說明.md`（要申請的 key + 申請網址 + 可直接貼的 Claude Code 提示詞）＋ 更新版 `.env.example`。掃過全無金鑰。
+
+### TODO
+- v0.1.17 發版（把 `81791de` 錄音 UX 修正帶進打包版）。
+- 手機收音若要用：關路由器 AP 隔離 + 永久停 `mc-fw-host`。
+
 ## 2026-06-27 — v0.1.16：整檔精修加 Groq Whisper 後援（Gemini 限流時自動接手＋長錄音分段）
 
 ### ✅ 做了什麼
