@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { health, shutdownSidecar } from "./lib/api";
-import { checkForUpdate, installUpdateAndRelaunch } from "./lib/updater";
+import { checkForUpdate, installUpdateAndRelaunch, killSidecars } from "./lib/updater";
 import Workspace from "./components/Workspace";
 import { RouterBar, RouterDetails } from "./components/RouterPanel";
 import MemoryChat from "./components/MemoryChat";
@@ -48,6 +48,9 @@ export default function App() {
       // 先關掉 sidecar 釋放檔案鎖，NSIS 安裝才不會卡 lancedb .node（見 server.ts /shutdown）。
       await shutdownSidecar();
       await new Promise((r) => setTimeout(r, 600));
+      // 再強殺所有殘留/孤兒 leo-node（shutdown 只關當前那隻，關不到舊殘留）。
+      await killSidecars();
+      await new Promise((r) => setTimeout(r, 300));
       await installUpdateAndRelaunch(update);
     } catch (e) {
       console.warn("更新失敗", e);

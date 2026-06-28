@@ -7,6 +7,8 @@
 //!
 //! App 結束時會 kill 掉 spawn 的 sidecar（`RunEvent::Exit`，正常關閉路徑），避免 8765 殘留／
 //! 舊 sidecar 續跑舊碼／裝新版時 lancedb 檔被鎖。（force-kill 不經 Exit，屬另案。）
+//! 另：更新安裝前前端會 invoke `kill_sidecars` 強殺所有 leo-node（含 Exit 沒收到的孤兒殘留），
+//! 徹底釋放檔鎖再讓 NSIS 覆寫，根治 OTA「Error opening file for writing」。
 //! 正式版執行期密鑰（ENCRYPTION_SALT / GEMINI_API_KEY / GROQ_API_KEY）由 app 設定檔 config.json
 //! 注入（AppConfig，非 .env）；這裡只帶 SIDECAR_PORT 與 LEO_DATA_DIR。
 
@@ -26,6 +28,7 @@ pub fn run() {
     }
 
     builder
+        .invoke_handler(tauri::generate_handler![kill_sidecars])
         .setup(|_app| {
             // 正式版才 spawn 打包的 sidecar；dev 由 npm run dev 啟動。
             #[cfg(not(debug_assertions))]
@@ -53,6 +56,22 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// 更新安裝前由前端呼叫：強制殺掉所有 leo-node sidecar 行程（含本 App 沒管理到的「孤兒」殘留），
+/// 釋放 lancedb `.node` 等檔鎖，避免 NSIS OTA 出現「Error opening file for writing」。
+/// 只在 Windows 有作用（mac/Linux 更新不走 NSIS、無此檔鎖問題）；沒有行程可殺也無妨（忽略結果）。
+#[tauri::command]
+fn kill_sidecars() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000; // 別彈出 console 視窗
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/IM", "leo-node.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
 }
 
 /// 啟動打包進 resources 的 Node sidecar（leo-node externalBin + sidecar/server.cjs）。

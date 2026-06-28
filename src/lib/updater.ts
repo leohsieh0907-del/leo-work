@@ -11,6 +11,21 @@ export function isDesktopApp(): boolean {
   return inTauri();
 }
 
+/**
+ * 更新安裝前殺掉所有 leo-node sidecar（含本 App 沒管理到的孤兒殘留），釋放 lancedb .node 檔鎖，
+ * 避免 NSIS OTA「Error opening file for writing」。比 shutdownSidecar（只關當前那隻）更徹底。
+ * 非 Tauri 環境 no-op；失敗只記錄不阻斷更新。
+ */
+export async function killSidecars(): Promise<void> {
+  if (!inTauri()) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("kill_sidecars");
+  } catch (e) {
+    console.warn("殺殘留 sidecar 失敗", e);
+  }
+}
+
 /** 檢查是否有新版；無更新或非 Tauri 環境回 null。 */
 export async function checkForUpdate(): Promise<Update | null> {
   if (!inTauri()) return null;

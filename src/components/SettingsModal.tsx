@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import type { ConfigStatus } from "../shared/types";
 import { getConfig, saveConfig, shutdownSidecar } from "../lib/api";
-import { relaunchApp, checkForUpdate, installUpdateAndRelaunch, isDesktopApp } from "../lib/updater";
+import { relaunchApp, checkForUpdate, installUpdateAndRelaunch, isDesktopApp, killSidecars } from "../lib/updater";
 
 // 正式版設定畫面：輸入 Gemini 金鑰、選 LLM 來源 → 存進 app 資料夾 config.json（重啟生效）。
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -87,6 +87,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     try {
       await shutdownSidecar();
       await new Promise((r) => setTimeout(r, 600));
+      await killSidecars(); // 強殺殘留/孤兒 leo-node，釋放檔鎖
+      await new Promise((r) => setTimeout(r, 300));
       await installUpdateAndRelaunch(update);
     } catch (e) {
       setUpdateMsg(e instanceof Error ? e.message : "更新失敗，請稍後再試");
