@@ -1,8 +1,9 @@
 // ── 左側歷史會議欄 ──
 // 列出已加密存檔的會議；點一下載回工作區、可刪除、可開新會議。
 
-import { useEffect, useState } from "react";
-import { listMeetings, loadMeeting, deleteMeeting, renameMeeting } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { listMeetings, loadMeeting, deleteMeeting, renameMeeting, saveMeeting } from "../lib/api";
+import { exportMeeting, readMeetingBackup } from "../lib/backup";
 import type { MeetingListItem, SavedMeeting } from "../shared/types";
 
 interface Props {
@@ -28,6 +29,8 @@ export default function HistoryRail({
   const [items, setItems] = useState<MeetingListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     listMeetings()
@@ -76,6 +79,38 @@ export default function HistoryRail({
     }
   }
 
+  // 匯出：解密讀回整場 → 下載「<會議名>.json（可救回）+ <會議名>.txt（純逐字稿）」。
+  async function handleExport(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await loadMeeting(id);
+      exportMeeting(r.meeting);
+      setNotice("已匯出 .json + .txt（檔名＝會議名）");
+    } catch (er) {
+      setError(er instanceof Error ? er.message : "匯出失敗");
+    }
+  }
+
+  // 匯入：讀 JSON 備份還原成一場會議並存檔（同 id 視為覆蓋還原）。
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 清掉以便能再選同一個檔
+    if (!file) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const meeting = await readMeetingBackup(file);
+      await saveMeeting(meeting);
+      const r = await listMeetings();
+      setItems(r.meetings);
+      setNotice(`已匯入「${meeting.title}」（開啟後按存檔可納入跨會議記憶）`);
+    } catch (er) {
+      setError(er instanceof Error ? er.message : "匯入失敗");
+    }
+  }
+
   return (
     <aside className="flex w-56 shrink-0 flex-col gap-2 border-r border-line bg-brand-panel/40 p-3">
       <button
@@ -84,8 +119,25 @@ export default function HistoryRail({
       >
         ＋ 新會議
       </button>
-      <div className="mt-1 text-xs font-semibold text-fg-subtle">歷史會議</div>
+      <div className="mt-1 flex items-center justify-between">
+        <span className="text-xs font-semibold text-fg-subtle">歷史會議</span>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={handleImport}
+        />
+        <button
+          onClick={() => importInputRef.current?.click()}
+          title="從 .json 備份還原一場會議"
+          className="rounded px-1.5 py-0.5 text-xs text-fg-faint transition hover:bg-hover-weak hover:text-fg"
+        >
+          ⬆ 匯入
+        </button>
+      </div>
       {error && <p className="text-xs text-brand-danger">{error}</p>}
+      {notice && <p className="text-xs text-brand-accent">{notice}</p>}
       <div className="flex-1 space-y-1 overflow-y-auto">
         {items.length === 0 && <p className="px-1 text-xs text-fg-faint">（尚無存檔）</p>}
         {items.map((m) => (
@@ -101,6 +153,13 @@ export default function HistoryRail({
                 {busyId === m.id ? "載入中…" : m.title || m.id}
               </span>
               <span className="flex shrink-0 items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                <button
+                  onClick={(e) => handleExport(m.id, e)}
+                  title="匯出/備份（.json 可救回 + .txt 逐字稿，檔名＝會議名）"
+                  className="text-xs text-fg-faint transition hover:text-fg"
+                >
+                  ⬇
+                </button>
                 <button
                   onClick={(e) => handleRename(m, e)}
                   title="改名"
