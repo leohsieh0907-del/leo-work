@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import type { Update } from "@tauri-apps/plugin-updater";
 import type { ConfigStatus } from "../shared/types";
-import { getConfig, saveConfig } from "../lib/api";
-import { relaunchApp } from "../lib/updater";
+import { getConfig, saveConfig, shutdownSidecar } from "../lib/api";
+import { relaunchApp, checkForUpdate, installUpdateAndRelaunch, isDesktopApp } from "../lib/updater";
 
 // 正式版設定畫面：輸入 Gemini 金鑰、選 LLM 來源 → 存進 app 資料夾 config.json（重啟生效）。
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -13,6 +14,12 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [savedNeedRestart, setSavedNeedRestart] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 版本與更新
+  const [checking, setChecking] = useState(false);
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
 
   useEffect(() => {
     getConfig()
@@ -51,6 +58,42 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // 主動檢查更新：有新版存起來顯示「立即更新」；沒有就顯示「已是最新」；網頁版提示用桌面版。
+  async function handleCheckUpdate() {
+    setChecking(true);
+    setUpdate(null);
+    setUpdateMsg(null);
+    try {
+      const u = await checkForUpdate();
+      if (u) setUpdate(u);
+      else
+        setUpdateMsg(
+          isDesktopApp()
+            ? `✅ 已是最新版 v${__APP_VERSION__}`
+            : "網頁版不支援自動更新，請改用桌面版 App",
+        );
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : "檢查更新失敗");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  // 下載安裝新版並重啟（同 App.tsx 橫幅：先關 sidecar 釋放檔鎖再裝，見 server.ts /shutdown）。
+  async function handleApplyUpdate() {
+    if (!update) return;
+    setUpdating(true);
+    setUpdateMsg(null);
+    try {
+      await shutdownSidecar();
+      await new Promise((r) => setTimeout(r, 600));
+      await installUpdateAndRelaunch(update);
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : "更新失敗，請稍後再試");
+      setUpdating(false);
+    }
+  }
+
   const inputCls =
     "w-full rounded-md border border-line bg-inset px-3 py-2 text-sm outline-none focus:border-brand";
 
@@ -75,6 +118,36 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             {error}
           </div>
         )}
+
+        {/* 版本與更新：主動「檢查更新」→ 有新版可一鍵下載重啟 */}
+        <div className="mb-4 rounded-md border border-line bg-inset px-3 py-2.5">
+          <div className="flex items-center gap-3">
+            <div className="text-sm">
+              <span className="text-fg-muted">目前版本 </span>
+              <span className="font-mono text-fg">v{__APP_VERSION__}</span>
+            </div>
+            <button
+              onClick={() => void handleCheckUpdate()}
+              disabled={checking || updating}
+              className="ml-auto rounded-md border border-line bg-hover-weak px-3 py-1.5 text-sm text-fg transition hover:bg-hover disabled:opacity-50"
+            >
+              {checking ? "檢查中…" : "檢查更新"}
+            </button>
+          </div>
+          {update && (
+            <div className="mt-2 flex items-center gap-3 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm">
+              <span>✨ 有新版 v{update.version}</span>
+              <button
+                onClick={() => void handleApplyUpdate()}
+                disabled={updating}
+                className="ml-auto rounded-md bg-brand px-3 py-1 text-white transition hover:opacity-90 disabled:opacity-50"
+              >
+                {updating ? "更新中…" : "立即更新並重啟"}
+              </button>
+            </div>
+          )}
+          {updateMsg && <p className="mt-2 text-xs text-fg-faint">{updateMsg}</p>}
+        </div>
 
         <label className="mb-1 block text-sm text-fg-muted">
           Gemini API 金鑰

@@ -6,6 +6,11 @@ function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/** 是否為桌面 App（Tauri 殼）；網頁版/dev 為 false，無法自動更新。 */
+export function isDesktopApp(): boolean {
+  return inTauri();
+}
+
 /** 檢查是否有新版；無更新或非 Tauri 環境回 null。 */
 export async function checkForUpdate(): Promise<Update | null> {
   if (!inTauri()) return null;
