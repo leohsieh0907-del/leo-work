@@ -128,6 +128,9 @@ export default function Workspace() {
   // 否則 router 停止→精修會造成第二次上升緣，把快照重抓成（可能已切走的）目前會議 → 寫錯場。
   const captureActive = micBusy || routerState !== AudioSourceState.DISCONNECTED;
 
+  // 錄音中讓 AI 助理面板讓出空間，避免逐字稿區被擠到看不見（停止後自動恢復原本展開狀態）。
+  const effectiveChatOpen = chatOpen && !captureActive;
+
   // 擷取一開始就記住「原場」會議；停止後 routeRecordedText 會把逐字稿寫回這裡。
   useEffect(() => {
     if (captureActive && !wasCapturingRef.current) {
@@ -492,7 +495,7 @@ export default function Workspace() {
         {/* 底部：🦉 AI 助理。永遠掛載（收合只切顯示，不卸載）→ 對話不會被清空。*/}
         <div
           className={
-            chatOpen
+            effectiveChatOpen
               ? `${chatBig ? "h-[32rem]" : "h-80"} shrink-0 rounded-lg border border-line bg-brand-panel/40 p-4`
               : "shrink-0"
           }
@@ -506,7 +509,7 @@ export default function Workspace() {
             big={chatBig}
             onToggleBig={() => setChatBig((v) => !v)}
             onCollapse={() => setChatOpen(false)}
-            collapsed={!chatOpen}
+            collapsed={!effectiveChatOpen}
             onExpand={() => setChatOpen(true)}
           />
         </div>

@@ -43,6 +43,18 @@ export function RouterBar() {
   const active = status?.activeSourceId ?? null;
   const realtimeActive = isRealtime(state);
 
+  // 錄音計時（即時源在錄時每秒跳；停止歸零）
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!realtimeActive) {
+      setElapsed(0);
+      return;
+    }
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [realtimeActive]);
+  const clock = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+
   function onSource(id: AudioSourceId) {
     if (id === "bluetooth") void syncBluetooth(); // 藍牙走背景同步，即時串流中也可按
     else void activate(id);
@@ -75,7 +87,7 @@ export function RouterBar() {
           className="flex shrink-0 items-center gap-1.5 rounded-md bg-brand-danger px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-          停止
+          停止 <span className="font-mono tabular-nums">{clock}</span>
         </button>
       )}
 
