@@ -278,8 +278,10 @@ export interface PhoneSession {
   token: string;
   /** QR Code 的 data URL（直接塞 <img src>） */
   qrDataUrl: string;
-  /** 偵測到的區網 IP */
+  /** 目前 QR 使用的區網 IP */
   lanIp: string;
+  /** 所有可用的區網 IP 候選（多網卡時供 UI 下拉切換；已排除 link-local，虛擬網卡置後）*/
+  candidates: string[];
   /** WSS 埠 */
   port: number;
 }

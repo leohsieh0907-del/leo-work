@@ -519,8 +519,9 @@ app.get(
 // 收音實際由 audioRouter 的 webrtc 來源（phoneSource）驅動；這裡只取手機橋接的連線資訊。
 app.get(
   "/audio/session",
-  wrap(async (_req, res) => {
-    const session = await phoneBridge.getSession();
+  wrap(async (req, res) => {
+    const ip = typeof req.query.ip === "string" ? req.query.ip : undefined;
+    const session = await phoneBridge.getSession(ip);
     res.json(session);
   }),
 );

@@ -102,16 +102,26 @@ export class PhoneBridgeServer implements PhoneBridge {
 
   // ─────────────── getSession：確保啟動並回 QR / token / url ───────────────
 
-  async getSession(): Promise<PhoneSession> {
+  /**
+   * 回 QR / token / url。`preferredIp` 可指定要用哪個區網 IP（多網卡時讓使用者選與手機
+   * 同網段的那個）；未指定或不在候選內則用偵測到的預設。candidates 為目前所有可用 IP。
+   */
+  async getSession(preferredIp?: string): Promise<PhoneSession> {
     await this.ensureStarted();
-    const url = `https://${this.lanIp}:${this.port}/m?token=${this.token}`;
+    // 每次重抓候選（網路可能在啟動後才變動，例如插拔 tether / 連上 Wi-Fi）。
+    const candidates = listLanIps();
+    const ip =
+      preferredIp && candidates.includes(preferredIp)
+        ? preferredIp
+        : (candidates[0] ?? this.lanIp);
+    const url = `https://${ip}:${this.port}/m?token=${this.token}`;
     let qrDataUrl: string;
     try {
       qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 320 });
     } catch (err) {
       throw new AppError(ErrorCode.IO_ERROR, "產生 QR Code 失敗", errMsg(err));
     }
-    return { url, token: this.token, qrDataUrl, lanIp: this.lanIp, port: this.port };
+    return { url, token: this.token, qrDataUrl, lanIp: ip, port: this.port, candidates };
   }
 
   // ─────────────── start / stop：轉發開關 ───────────────
@@ -331,19 +341,35 @@ export class PhoneBridgeServer implements PhoneBridge {
 
 // ─────────────── 工具函式 ───────────────
 
-/** os.networkInterfaces() 找第一個非 internal 的 IPv4；找不到退回 127.0.0.1。 */
-function detectLanIp(): string {
+/** 虛擬 / 不適合手機連線的網卡名稱（往候選清單後面排）。 */
+const VIRTUAL_IFACE_RE =
+  /(vEthernet|Hyper-V|VMware|VirtualBox|VBox|WSL|Loopback|Bluetooth|TAP|Tailscale|ZeroTier|Docker|Default Switch)/i;
+
+/**
+ * 列出可當手機連線目標的區網 IPv4 候選。
+ * 排除：internal、169.254.x.x（APIPA link-local，沒連上 DHCP，手機連不到）。
+ * 排序：實體網卡（Wi-Fi/乙太）優先，虛擬網卡（Hyper-V/VMware/WSL…）往後。
+ * 多網卡時交給 UI 讓使用者選與手機同網段的那個。
+ */
+function listLanIps(): string[] {
   const ifaces = os.networkInterfaces();
+  const real: string[] = [];
+  const virt: string[] = [];
   for (const name of Object.keys(ifaces)) {
-    const addrs = ifaces[name];
-    if (!addrs) continue;
-    for (const addr of addrs) {
+    for (const addr of ifaces[name] ?? []) {
       // Node 18+ 的 family 可能是 string("IPv4") 或 number(4)，兩種都判。
       const isIpv4 = addr.family === "IPv4" || (addr.family as unknown as number) === 4;
-      if (isIpv4 && !addr.internal) return addr.address;
+      if (!isIpv4 || addr.internal) continue;
+      if (addr.address.startsWith("169.254.")) continue; // APIPA：未連上正常網路，排除
+      (VIRTUAL_IFACE_RE.test(name) ? virt : real).push(addr.address);
     }
   }
-  return "127.0.0.1";
+  return [...real, ...virt];
+}
+
+/** 偵測預設區網 IP（候選清單第一個）；找不到退回 127.0.0.1。 */
+function detectLanIp(): string {
+  return listLanIps()[0] ?? "127.0.0.1";
 }
 
 /** 把 ws 傳來的多型 data 正規化成單一 Buffer。 */

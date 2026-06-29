@@ -23,3 +23,6 @@ src-tauri/gen/schemas
 
 # Office 暫存 / 鎖檔
 ~$*
+
+# 匯出的會議備份（含解密逐字稿/分析，勿上傳；本 repo 為 public）
+/語音備份

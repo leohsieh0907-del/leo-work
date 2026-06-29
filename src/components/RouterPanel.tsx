@@ -114,21 +114,26 @@ export function RouterDetails() {
   const [phoneSession, setPhoneSession] = useState<PhoneSession | null>(null);
   const [phoneSessionErr, setPhoneSessionErr] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(true); // QR 可收放，避免擋位置
+  const [selectedIp, setSelectedIp] = useState(""); // 使用者選的區網 IP（空＝用後端預設）
 
   const realtimeActive = isRealtime(state);
   const phoneActive = state === AudioSourceState.WEBRTC_STREAMING;
 
   // 手機收音來源啟用時取 QR / token / 網址；停用時清掉。
+  // selectedIp 改變（使用者下拉切網卡）會重抓，產生指向該 IP 的新 QR。
   useEffect(() => {
     if (!phoneActive) {
       setPhoneSession(null);
       setPhoneSessionErr(null);
+      setSelectedIp("");
       return;
     }
     let alive = true;
-    getPhoneSession()
+    getPhoneSession(selectedIp || undefined)
       .then((s) => {
-        if (alive) setPhoneSession(s);
+        if (!alive) return;
+        setPhoneSession(s);
+        setSelectedIp((cur) => cur || s.lanIp); // 首抓後記住預設 IP
       })
       .catch((e) => {
         if (alive) setPhoneSessionErr(e instanceof Error ? e.message : String(e));
@@ -136,7 +141,7 @@ export function RouterDetails() {
     return () => {
       alive = false;
     };
-  }, [phoneActive]);
+  }, [phoneActive, selectedIp]);
 
   const hasContent = phoneActive || status?.bluetooth.transferring || realtimeActive || error;
   if (!hasContent) return null;
@@ -166,6 +171,24 @@ export function RouterDetails() {
                     <span>1. 手機與電腦連同一個 Wi-Fi，掃描左方 QR</span>
                     <span>2. 首次會跳「憑證不受信任」→ 選繼續前往（自簽憑證，正常）</span>
                     <span>3. 開頁後按「開始傳送」，聲音即時回傳並轉成逐字稿</span>
+                    {phoneSession.candidates.length > 1 && (
+                      <label className="mt-1 flex items-center gap-1.5 text-fg-muted">
+                        連線網路 IP：
+                        <select
+                          value={selectedIp}
+                          onChange={(e) => setSelectedIp(e.target.value)}
+                          title="手機掃了連不到時，換成與手機同一個 Wi-Fi 網段的 IP"
+                          className="rounded border border-line bg-brand-panel px-1.5 py-0.5 text-xs text-fg outline-none focus:border-brand"
+                        >
+                          {phoneSession.candidates.map((ip) => (
+                            <option key={ip} value={ip}>
+                              {ip}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-fg-faint">（連不到就換一個）</span>
+                      </label>
+                    )}
                     <span className="mt-1 break-all text-fg-faint">{phoneSession.url}</span>
                     <span className="text-fg-faint">手機開始傳送後，上方音量條會跳動、即時逐字稿會出現。</span>
                   </div>

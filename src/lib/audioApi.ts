@@ -18,9 +18,9 @@ export function getAudioDevices(): Promise<AudioDeviceList> {
   return jsonGet("/audio/devices");
 }
 
-/** 取得手機連線 QR / token / 網址。 */
-export function getPhoneSession(): Promise<PhoneSession> {
-  return jsonGet("/audio/session");
+/** 取得手機連線 QR / token / 網址；可指定 ip 切換用哪個區網介面產 QR。 */
+export function getPhoneSession(ip?: string): Promise<PhoneSession> {
+  return jsonGet(ip ? `/audio/session?ip=${encodeURIComponent(ip)}` : "/audio/session");
 }
 
 /**
