@@ -21,6 +21,7 @@ import {
   type ComposedDoc,
 } from "../shared/types";
 import type { LlmService } from "./llm/types";
+import { analysisSystemPrompt, analysisUserPrompt } from "./llm/prompts";
 import { normalizeComposedDoc } from "./GeminiLlmService";
 import { chunkWavByBytes } from "./wavChunk";
 
@@ -171,13 +172,9 @@ export class GroqLlmService implements LlmService {
     historicalContext: string,
   ): Promise<ProactiveAnalysis> {
     const system =
-      "你是專業的會議分析助理，只根據『當前會議逐字稿』實際內容分析，所有結論都要有逐字稿依據，嚴禁虛構。全程繁體中文。\n" +
-      "請只輸出一個 JSON 物件，欄位：\n" +
-      'theme(string，一句話總結會議在談什麼)、key_summary(string[]，關鍵決定與重點，每點具體一句)、' +
-      "historical_conflicts(string[]，與歷史背景明顯不一致處；沒有就空陣列)。";
-    const user =
-      "=== 當前會議逐字稿 ===\n" + currentTranscript +
-      "\n\n=== 歷史會議背景 ===\n" + (historicalContext.trim() || "（無歷史背景）");
+      analysisSystemPrompt({ today: todayString(), withActionItems: false }) +
+      "\n請只輸出一個 JSON 物件，欄位：theme(string)、key_summary(string[])、historical_conflicts(string[])。";
+    const user = analysisUserPrompt(currentTranscript, historicalContext);
     const obj = safeJsonObject(await this.complete([
       { role: "system", content: system }, { role: "user", content: user },
     ], true));
@@ -205,14 +202,10 @@ export class GroqLlmService implements LlmService {
     historicalContext: string,
   ): Promise<{ analysis: ProactiveAnalysis; actionItems: ActionItem[] }> {
     const system =
-      `今天是 ${todayString()}。你是專業會議分析助理，只根據『當前會議逐字稿』實際內容分析，所有結論都要有逐字稿依據，嚴禁虛構。全程繁體中文。\n` +
-      "請只輸出一個 JSON 物件，欄位：\n" +
-      "theme(string)、key_summary(string[])、historical_conflicts(string[]，沒有就空陣列)、\n" +
-      "action_items(物件陣列，每項 {task, assignee, deadline})——assignee 沒明講寫「未指定」；" +
-      "deadline 把相對時間依今天日期換算成 YYYY-MM-DD，沒提到寫「未指定」；沒有待辦給空陣列。";
-    const user =
-      "=== 當前會議逐字稿 ===\n" + currentTranscript +
-      "\n\n=== 歷史會議背景 ===\n" + (historicalContext.trim() || "（無歷史背景）");
+      analysisSystemPrompt({ today: todayString(), withActionItems: true }) +
+      "\n請只輸出一個 JSON 物件，欄位：theme(string)、key_summary(string[])、historical_conflicts(string[])、" +
+      "action_items(物件陣列，每項 {task, assignee, deadline})。";
+    const user = analysisUserPrompt(currentTranscript, historicalContext);
     const obj = safeJsonObject(await this.complete([
       { role: "system", content: system }, { role: "user", content: user },
     ], true));

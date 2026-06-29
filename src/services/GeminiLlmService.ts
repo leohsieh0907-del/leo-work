@@ -21,6 +21,7 @@ import {
   type DocBlock,
 } from "../shared/types";
 import type { LlmService } from "./llm/types";
+import { analysisSystemPrompt, analysisUserPrompt } from "./llm/prompts";
 
 export interface GeminiLlmOptions {
   apiKey: string;
@@ -218,18 +219,8 @@ export class GeminiLlmService implements LlmService {
     currentTranscript: string,
     historicalContext: string,
   ): Promise<ProactiveAnalysis> {
-    const system =
-      "你是專業的會議分析助理。只根據使用者提供的『當前會議逐字稿』實際內容做分析，所有結論都要有逐字稿依據，嚴禁虛構。\n" +
-      "theme：一句話總結會議在談什麼。\n" +
-      "key_summary：關鍵決定與討論重點，每點一句、要具體。\n" +
-      "historical_conflicts：當前內容與『歷史會議背景』明顯不一致之處；沒有歷史或無衝突就給空陣列。\n" +
-      "全程使用繁體中文。";
-
-    const user =
-      "=== 當前會議逐字稿 ===\n" +
-      currentTranscript +
-      "\n\n=== 歷史會議背景 ===\n" +
-      (historicalContext.trim() || "（無歷史背景）");
+    const system = analysisSystemPrompt({ today: todayString(), withActionItems: false });
+    const user = analysisUserPrompt(currentTranscript, historicalContext);
 
     const raw = await this.generate(system, user, ANALYSIS_SCHEMA);
     const obj = safeJsonObject(raw);
@@ -245,20 +236,8 @@ export class GeminiLlmService implements LlmService {
     currentTranscript: string,
     historicalContext: string,
   ): Promise<{ analysis: ProactiveAnalysis; actionItems: ActionItem[] }> {
-    const system =
-      `今天是 ${todayString()}。你是專業會議分析助理，只根據提供的『當前會議逐字稿』實際內容分析，所有結論都要有逐字稿依據，嚴禁虛構。\n` +
-      "theme：一句話總結會議在談什麼。\n" +
-      "key_summary：關鍵決定與討論重點，每點一句、要具體。\n" +
-      "historical_conflicts：當前內容與『歷史會議背景』明顯不一致之處；沒有歷史或無衝突就給空陣列。\n" +
-      "action_items：要有人去執行的待辦——task 具體要做什麼；assignee 負責人（沒明講寫『未指定』）；" +
-      "deadline 把『下週五/月底前』等相對時間依今天日期換算成 YYYY-MM-DD（沒提到寫『未指定』）；沒有任何待辦就給空陣列。\n" +
-      "全程使用繁體中文。";
-
-    const user =
-      "=== 當前會議逐字稿 ===\n" +
-      currentTranscript +
-      "\n\n=== 歷史會議背景 ===\n" +
-      (historicalContext.trim() || "（無歷史背景）");
+    const system = analysisSystemPrompt({ today: todayString(), withActionItems: true });
+    const user = analysisUserPrompt(currentTranscript, historicalContext);
 
     const raw = await this.generate(system, user, ANALYZE_ALL_SCHEMA);
     const obj = safeJsonObject(raw);
