@@ -113,6 +113,14 @@ export async function loadMeeting(id: string): Promise<{ meeting: SavedMeeting }
   return (await r.json()) as { meeting: SavedMeeting };
 }
 
+/** 把一場會議備份（.json 可救回 + .txt 可讀）寫到指定資料夾（sidecar 直接落地）。 */
+export async function backupMeetingToDir(
+  id: string,
+  dir: string,
+): Promise<{ dir: string; files: string[] }> {
+  return post(`/meetings/${encodeURIComponent(id)}/backup`, { dir });
+}
+
 /** 改名（只改顯示用 title，id 不動）。 */
 export async function renameMeeting(id: string, title: string): Promise<{ item: MeetingListItem }> {
   const r = await fetch(`${BASE}/meetings/${encodeURIComponent(id)}`, {

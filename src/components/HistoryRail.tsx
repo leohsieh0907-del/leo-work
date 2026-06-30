@@ -2,8 +2,16 @@
 // 列出已加密存檔的會議；點一下載回工作區、可刪除、可開新會議。
 
 import { useEffect, useRef, useState } from "react";
-import { listMeetings, loadMeeting, deleteMeeting, renameMeeting, saveMeeting } from "../lib/api";
+import {
+  listMeetings,
+  loadMeeting,
+  deleteMeeting,
+  renameMeeting,
+  saveMeeting,
+  backupMeetingToDir,
+} from "../lib/api";
 import { exportMeeting, readMeetingBackup } from "../lib/backup";
+import { isDesktopApp } from "../lib/updater";
 import type { MeetingListItem, SavedMeeting } from "../shared/types";
 
 interface Props {
@@ -79,15 +87,27 @@ export default function HistoryRail({
     }
   }
 
-  // 匯出：解密讀回整場 → 下載「<會議名>.json（可救回）+ <會議名>.txt（純逐字稿）」。
+  // 匯出/備份：<會議名>_<日期>.json（可救回）+ .txt（可讀）。
+  // 桌面版：跳資料夾選擇器（預設上次/語音備份）→ sidecar 直接寫進去。
+  // 瀏覽器/dev：退回瀏覽器下載（只能進 Downloads）。
   async function handleExport(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     setError(null);
     setNotice(null);
     try {
-      const r = await loadMeeting(id);
-      exportMeeting(r.meeting);
-      setNotice("已匯出 .json + .txt（檔名＝會議名）");
+      if (isDesktopApp()) {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const defaultPath = localStorage.getItem("exportDir") || "D:\\Leo work\\語音備份";
+        const dir = await open({ directory: true, defaultPath, title: "選擇備份資料夾" });
+        if (typeof dir !== "string" || !dir) return; // 使用者取消
+        localStorage.setItem("exportDir", dir); // 記住，下次預設這裡
+        const r = await backupMeetingToDir(id, dir);
+        setNotice(`已存到 ${r.dir}（${r.files.join("、")}）`);
+      } else {
+        const r = await loadMeeting(id);
+        exportMeeting(r.meeting);
+        setNotice("已匯出 .json + .txt（瀏覽器下載）");
+      }
     } catch (er) {
       setError(er instanceof Error ? er.message : "匯出失敗");
     }

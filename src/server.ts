@@ -7,6 +7,7 @@
 import "dotenv/config";
 import { loadRuntimeConfig, updateRuntimeConfig, getRuntimeConfigStatus } from "./services/AppConfig";
 import path from "node:path";
+import { writeFile, mkdir } from "node:fs/promises";
 import http from "node:http";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
@@ -444,6 +445,37 @@ app.post(
 
 // ─────────────── 會議存檔 / 歷史 ───────────────
 
+/** 會議 → 可讀純文字（表頭 + 逐字稿 + AI 分析 + 行動方針），給備份 .txt 用。 */
+function meetingToReadableText(m: SavedMeeting): string {
+  const date = m.date ? m.date.slice(0, 10) : "";
+  const lines: string[] = [
+    `會議：${m.title || m.id}`,
+    `日期：${date}`,
+    "─".repeat(24),
+    "",
+    "【逐字稿】",
+    m.transcript ?? "",
+    "",
+  ];
+  if (m.analysis) {
+    lines.push("【AI 分析】", `主題：${m.analysis.theme ?? ""}`);
+    if (m.analysis.key_summary?.length) {
+      lines.push("重點：", ...m.analysis.key_summary.map((s) => `  • ${s}`));
+    }
+    if (m.analysis.historical_conflicts?.length) {
+      lines.push("歷史衝突：", ...m.analysis.historical_conflicts.map((s) => `  • ${s}`));
+    }
+    lines.push("");
+  }
+  if (m.actionItems?.length) {
+    lines.push(
+      "【行動方針】",
+      ...m.actionItems.map((a) => `  • ${a.task}（負責：${a.assignee}，期限：${a.deadline}）`),
+    );
+  }
+  return lines.join("\n");
+}
+
 app.get(
   "/meetings",
   wrap(async (_req, res) => {
@@ -488,6 +520,33 @@ app.patch(
     }
     const item = await meetingStore.rename(req.params.id, title);
     res.json({ item });
+  }),
+);
+
+// 把一場會議備份寫到使用者指定資料夾：<會議名>_<日期>.json（可救回）+ .txt（可讀）。
+// 前端用 Tauri dialog 選資料夾後帶 dir 進來；sidecar 直接落地（webview 下載只能進 Downloads）。
+app.post(
+  "/meetings/:id/backup",
+  wrap(async (req, res) => {
+    const { dir } = req.body as { dir?: string };
+    if (!dir || typeof dir !== "string") {
+      throw new AppError(ErrorCode.INVALID_INPUT, "需提供備份資料夾 dir");
+    }
+    const meeting = await meetingStore.load(req.params.id);
+    if (!meeting) throw new AppError(ErrorCode.IO_ERROR, "找不到該會議");
+
+    const date = meeting.date ? meeting.date.slice(0, 10) : "";
+    const safe =
+      ((meeting.title || meeting.id).replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim() ||
+        "會議").slice(0, 80);
+    const base = date ? `${safe}_${date}` : safe;
+
+    await mkdir(dir, { recursive: true });
+    const jsonName = `${base}.json`;
+    const txtName = `${base}.txt`;
+    await writeFile(path.join(dir, jsonName), JSON.stringify(meeting, null, 2), "utf8");
+    await writeFile(path.join(dir, txtName), meetingToReadableText(meeting), "utf8");
+    res.json({ dir, files: [jsonName, txtName] });
   }),
 );
 

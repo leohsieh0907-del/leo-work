@@ -19,10 +19,11 @@ tauri-plugin-shell = "2"   # 啟動 / 管理 Node sidecar
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# 自動更新（從 GitHub Releases 拉新版）+ 更新後重啟
+# 自動更新（從 GitHub Releases 拉新版）+ 更新後重啟 + 原生資料夾選擇（匯出備份用）
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-dialog = "2"
 
 [profile.release]
 strip = true
