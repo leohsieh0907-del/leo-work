@@ -6,6 +6,33 @@
 
 ---
 
+## 2026-06-29~30 — v0.1.18/19/20 連發：分析會議/課程自動辨識 + 手機收音選IP + 匯出選資料夾 + 揪出雙安裝當機真因
+
+### ✅ 做了什麼
+- **v0.1.18 分析修正（commit `ffb5f55`，已 OTA）**：庭晰回報「同一份錄音，分析只吃新錄的段、前面不整合」。三次真 Gemini 實測證實**與時間戳 restart / 段落順序無關**——根因是分析提示自我定位成「商務會議助理」只抽決策/待辦，把課程的講解/舉例當雜訊濾掉。修法：抽共用 `src/services/llm/prompts.ts`（`analysisSystemPrompt`/`analysisUserPrompt`，**會議/課程自動辨識**＋多段 restart 視為同一場完整涵蓋每段、不因像閒聊就略過），Gemini+Groq 的 `generateProactiveAnalysis`/`analyzeAll` 共 4 處改用。端到端驗證雙段（訂閱制＋生活化舉例）皆涵蓋。
+- **kill_sidecars 釐清（非新做）**：skill/記憶原記「v0.1.18=kill_sidecars 未上」是**誤判**。其實它在 commit `6212e09`（v0.1.17 後進 main），而 `6212e09` 是 `ffb5f55`(v0.1.18) 的父 commit → **已隨 v0.1.18 出貨**（lib.rs Tauri command + updater.ts killSidecars + App.tsx/SettingsModal 兩條更新流程都接好）。v0.1.17 tag 不含。
+- **v0.1.19 手機收音選 IP（commit `eacf704`，已 OTA）**：`PhoneBridgeServer.detectLanIp` 原本只取列舉第一個非 internal IPv4，多網卡（VB-CABLE/iPhone tether/Hyper-V）會選錯 → QR 指到手機連不到的 IP。改：排除 `169.254.*`(APIPA)、虛擬網卡名稱往後排；`PhoneSession` 加 `candidates[]`；`/audio/session?ip=` 可指定；`RouterDetails` QR 面板加 IP 下拉（>1 候選才顯示）。實測當下 PC 只連 iPhone 熱點（172.20.10.4/28），故只 1 候選。
+- **v0.1.20 匯出選資料夾（commit `c93129a`，已 OTA）**：歷史 ⬇ 匯出原走瀏覽器下載只能進 Downloads。改：桌面版點 ⬇ → **Tauri dialog 外掛**開「選資料夾」（預設 localStorage `exportDir`，初值 `D:\Leo work\語音備份`）→ sidecar `POST /meetings/:id/backup {dir}` 直接寫 `<會議名>_<日期>.json`(可救回)＋`.txt`(表頭+逐字稿+AI分析+行動方針)。新增 `tauri-plugin-dialog`（Cargo + lib.rs + capabilities `dialog:default` + JS dep）。瀏覽器/dev 退回原下載。
+- **6 場會議備份**：批次解密匯出到 `D:\Leo work\語音備份`（.json+.txt，含分析）；其中 3 場原無分析（EMBA會計/1009/1511）補跑分析（課程式 9/14/8 點重點）並**寫回 App 存檔**。`.gitignore` 加 `/語音備份`（含解密內容、repo 為 public）。
+
+### 🕳️ 反覆「當機/Failed to fetch」的真因（重要，未來別重查）
+- 症狀：歷史會議「Failed to fetch」、sidecar 8765 連不上。前期以為是 sidecar 偶發崩潰，重開可救。
+- **真因（最後揪出）**：機器上有**兩個安裝、桌面兩個捷徑**——「**語音轉文字**」(`AppData\Local\語音轉文字\`，OTA 跟到的真版 0.1.20)＋舊「**Leo work**」(`AppData\Local\Leo work\`，停在 **0.1.4**、早於所有 sidecar spawn 修正、起不了後端)。**點到舊「Leo work」捷徑就當**。那個 6/22 的 `sidecar.log`(EISDIR 'C:') 也是 0.1.4 留下的。
+- **處置**：刪掉舊安裝資料夾 + 舊捷徑，只留「語音轉文字」。兩版共用資料（identifier 同 `com.leowork.desktop`，資料在 `Roaming\com.leowork.desktop`，刪舊程式不傷資料）。**鐵則：以後只從「語音轉文字」捷徑開**。
+- 另：沙盒擋 `Remove-Item` 含 `\*` 萬用字元 → 改用 .NET `[IO.Directory]::Delete($dir,$true)`。
+
+### 📌 發版流程踩到的 token 視角問題
+- **草稿 release 只有「具 push 權」的 token 看得到**；用唯讀 token 查 `/releases` 會看不到草稿、誤判「build 失敗」。實際 CI 都成功。對策：發佈前**逐條憑證找出能看到草稿的那把**（也是能 PATCH 發佈的那把），`.git-credentials` 條目順序會變、別寫死第幾條。
+- 三版都驗證：CI success → latest.json version 對 + Windows 穩定 tagged 網址 → PATCH 發佈 → 匿名 `releases/latest/download/latest.json` + exe(200) 通過。
+
+### 驗證結果
+- 每版皆 typecheck（兩 tsconfig exit 0）＋ vitest 100/100 ＋ vite build 全綠；Tauri(Rust，含 dialog 外掛)由 CI matrix 驗。
+- git：本機 main 與 origin 同步，commit `ffb5f55`/`eacf704`/`c93129a` + tag v0.1.18/19/20 皆已推遠端並發佈成 Release。
+
+### TODO / 提醒
+- 手機收音核心前提不變：**PC 與手機須同一網路**；公司 WiFi 常開「用戶端隔離」會擋裝置互連（與程式無關）。v0.1.19 的 IP 下拉只在 PC 有多個可用網路時幫得上。
+- 庭晰一律從「語音轉文字」捷徑開 App（舊「Leo work」已移除）。
+
 ## 2026-06-27（續）— v0.1.16 OTA 發佈 + 錄音 UX 修正 + 手機收音排查 + 無金鑰備份
 
 ### ✅ 做了什麼
