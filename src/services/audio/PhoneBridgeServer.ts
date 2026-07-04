@@ -198,10 +198,24 @@ export class PhoneBridgeServer implements PhoneBridge {
     let key: string;
     let cert: string;
     try {
-      // 自簽憑證：手機 getUserMedia 需安全環境。CN 用區網 IP，效期一年。
+      // 自簽憑證：手機 getUserMedia 需安全環境（HTTPS）。
+      // ⚠️ 現代 iOS/Safari 只認 SAN（Subject Alternative Name），不認 commonName → 憑證的 IP
+      // 一定要放進 SAN，否則手機判「憑證無效」擋掉 wss。故 SAN 帶「所有」區網 IPv4 + localhost/127.0.0.1，
+      // 並標 extKeyUsage=serverAuth。每次 boot 重新產生（未持久化）→ 天生就是最新憑證，無舊壞檔問題。
+      const altNames = certAltNames([this.lanIp, ...listLanIps()]);
       const pems = selfsigned.generate(
         [{ name: "commonName", value: this.lanIp }],
-        { days: 365, keySize: 2048, algorithm: "sha256" },
+        {
+          days: 365,
+          keySize: 2048,
+          algorithm: "sha256",
+          extensions: [
+            { name: "basicConstraints", cA: false },
+            { name: "keyUsage", digitalSignature: true, keyEncipherment: true },
+            { name: "extKeyUsage", serverAuth: true },
+            { name: "subjectAltName", altNames },
+          ],
+        },
       );
       key = pems.private;
       cert = pems.cert;
@@ -370,6 +384,15 @@ function listLanIps(): string[] {
 /** 偵測預設區網 IP（候選清單第一個）；找不到退回 127.0.0.1。 */
 function detectLanIp(): string {
   return listLanIps()[0] ?? "127.0.0.1";
+}
+
+/**
+ * 產生自簽憑證的 SAN altNames：localhost(DNS) + 127.0.0.1 + 傳入的所有區網 IPv4（去重）。
+ * selfsigned/node-forge 格式：DNS 用 {type:2,value}、IP 用 {type:7,ip}。
+ */
+export function certAltNames(ips: string[]): Array<{ type: number; value?: string; ip?: string }> {
+  const uniqueIps = Array.from(new Set(["127.0.0.1", ...ips].filter((ip) => ip && ip.trim())));
+  return [{ type: 2, value: "localhost" }, ...uniqueIps.map((ip) => ({ type: 7, ip }))];
 }
 
 /** 把 ws 傳來的多型 data 正規化成單一 Buffer。 */
