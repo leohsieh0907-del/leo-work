@@ -6,6 +6,36 @@
 
 ---
 
+## 2026-07-04 — v0.1.21：匯入音檔可靠性大改 + 長逐字稿全面支援（分析/聊天/翻譯不再撞 Groq TPM）
+
+### ✅ 做了什麼（起因：庭晰回報匯入手機 M4A 常轉不出/大檔靜默失敗，接著長逐字稿分析/聊天連撞 Groq 上限）
+- **匯入音檔改造（commit `bf94708`）**：
+  - 舊路徑 base64+JSON 被 `express.json` 50MB 擋 → 改**原始位元組直接上傳** `POST /transcribe/file`（`express.raw`，無大小限制）。
+  - 新 `AudioDecoder.ts`：ffmpeg 把任意格式（M4A/MP3/WebM…）轉 16k 單聲道 PCM16 WAV，**依實際內容辨識格式、不看 MIME**（解 M4A 空 MIME/Gemini Files API 不穩）。前端 `normalizeMime`。
+  - 匯入**不走錄音 origin 路由**（`onImportedText`→併入目前會議，不會靜默送去別場）。
+- **轉錄改分段並行管線 `transcribePipeline.ts`**：切段（6MB≈3 分/段，Gemini 可 inline 避開 Files API）→ 每段 **Gemini 主力、失敗 per-chunk Groq 後援** → 時間戳位移接回 → **多段並行(3條)** 加速；單段全敗只補缺漏標記不拖垮整檔。
+- **進度條**：新 WS 事件 `transcribe_progress`（開頭先發 0/N 讓條立刻出現）＋前端脈動/百分比/預估剩餘；**單段用脈動動畫**（無法顯示分段百分比）。
+- **長逐字稿三大文字任務全補**（根因：整份逐字稿一次送 LLM，Gemini 被匯入吃滿額度→轉 Groq→13000+ tokens 超過 Groq 免費層 **12000 TPM**）：
+  - **分析** `analyzePipeline.ts`：**map-reduce**（>6000 字切 5000 字/段各自摘要→合併；reduceInput 仍太長階層式再 reduce）。每段小、Gemini/Groq 都吃得下。
+  - **聊天** `relevance.ts`：只帶**與問題相關的片段**（CJK n-gram 關鍵詞比對，≤5000 字）→ **省額度**（不每句重送整份，解「怎麼這麼快用完」）＋不撞 TPM。
+  - **翻譯** `translatePipeline.ts`：**逐批翻**（保留每一行、不能像聊天只挑片段）；某批失敗保留原文不丟整份。
+  - 匯出：早已 cap 8000 字，本來就安全。
+
+### 關鍵決定 / 事實
+- **共同根因＝「長逐字稿整份丟給 LLM」**；共通解法＝分段（transcribe/analyze/translate 並行切段、chat 相關選取）。Groq 免費層 **12000 TPM** 是硬牆，任一整份請求超過即 `Request too large`。
+- 匯入並行 3 段會較快吃 Gemini 每分鐘額度 → 緊接著的分析/聊天易轉 Groq；已靠上述分段讓 Groq 也接得住，不再硬噴。
+- **dev 期踩到**：Claude 一邊改檔→sidecar 重啟→App 的 health-gate remount 整個畫面→**未存檔的逐字稿被清**（誤以為匯入沒填）。非程式 bug，打包版日常不會遇到。
+
+### 驗證結果
+- typecheck ×2 exit 0、**vitest 122**（+transcribePipeline/analyzePipeline/relevance/translatePipeline 測試）、vite build 全綠。
+- 真 API 端到端（在 dev sidecar 上，用合成音檔/長逐字稿）：匯入 M4A→ffmpeg→WAV 往返、3 段並行轉錄(21s)、15k 字分析 map-reduce(21.8s)、長逐字稿聊天相關選取(4.8s)、270 行翻譯逐批(16.9s，行數不掉) 皆通過。
+- 非碰錢/加密，未強制 /code-review（CLAUDE.md 規定）。
+
+### 現況 / 待辦
+- 已 commit 本機 main（`bf94708` 程式 + 本次版號/日誌/skill）。**發版 v0.1.21** 進行中（tag→CI→OTA）。
+- 桌面新增「**Leo work 開發版**」捷徑（指向 start-leo-work.bat）供 dev 測試，與打包版「語音轉文字」區分。
+- 手機收音兩道外部牆探測結論：McAfee `mc-fw-host` 目前停(Automatic 重開機會回)、防火牆 8443 規則在(Profile Any)、**Tailscale 佔 8443 但只綁 Tailscale IP、不影響手機走 Wi-Fi 192.168.0.204**（實測 0.0.0.0:8443 綁得上）；剩「路由器 AP 隔離」需手機實測。
+
 ## 2026-06-29~30 — v0.1.18/19/20 連發：分析會議/課程自動辨識 + 手機收音選IP + 匯出選資料夾 + 揪出雙安裝當機真因
 
 ### ✅ 做了什麼
