@@ -349,6 +349,8 @@ export type AudioEvent =
   | { type: "vu"; level: VuLevel; source: AudioSourceKind | AudioSourceId }
   | { type: "status"; status: AudioEngineStatus }
   | { type: "transcript"; segments: { start: number; end: number; text: string }[] }
+  // 整檔精修/匯入轉錄的分段進度（done 從 1 到 total；前端畫進度條）
+  | { type: "transcribe_progress"; done: number; total: number }
   | { type: "error"; message: string }
   // 收音整檔精修：前景 session 停止後，回報這段錄音是否可精修帶入會議
   | { type: "recording"; ready: boolean; seconds: number; truncated: boolean }

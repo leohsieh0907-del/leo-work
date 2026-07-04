@@ -40,6 +40,9 @@ interface AudioStore {
   /** 精修中（呼叫 /router/transcribe）。 */
   finalizing: boolean;
 
+  /** 分段轉錄進度（匯入/整檔精修共用）；null＝沒有進行中。etaSec＝預估剩餘秒數。 */
+  transcribeProgress: { done: number; total: number; etaSec: number } | null;
+
   /** 連上 /events 並開始接收事件；回傳取消訂閱函式。 */
   connect: () => () => void;
   activate: (id: AudioSourceId) => Promise<void>;
@@ -47,7 +50,12 @@ interface AudioStore {
   syncBluetooth: () => Promise<void>;
   /** 把剛停止的收音整檔精修，回乾淨逐字稿（呼叫端負責帶入會議）。 */
   finalizeRecording: (lang: TranscribeLang) => Promise<string>;
+  /** 清掉進度條（匯入/精修結束或失敗時呼叫，避免卡住）。 */
+  clearTranscribeProgress: () => void;
 }
+
+// 分段轉錄開始時間（算預估剩餘）；module 層即可，非 UI 狀態。
+let progressStartMs = 0;
 
 export const useAudioStore = create<AudioStore>((set) => ({
   state: AudioSourceState.DISCONNECTED,
@@ -60,6 +68,7 @@ export const useAudioStore = create<AudioStore>((set) => ({
   recordingSeconds: 0,
   recordingTruncated: false,
   finalizing: false,
+  transcribeProgress: null,
 
   connect: () => {
     return subscribeAudioEvents((e) => {
@@ -83,6 +92,15 @@ export const useAudioStore = create<AudioStore>((set) => ({
               : { recordingReady: false, recordingSeconds: 0, recordingTruncated: false, transcript: "" },
           );
           break;
+        case "transcribe_progress": {
+          const { done, total } = e;
+          if (done === 0) progressStartMs = Date.now(); // 開頭的 0/N 事件＝起算點
+          const elapsed = (Date.now() - progressStartMs) / 1000;
+          const etaSec = done > 0 && done < total ? Math.round((elapsed / done) * (total - done)) : 0;
+          // 全部完成就清掉（隱藏進度條）；否則更新進度（含開頭 0/N 讓條立刻出現）。
+          set({ transcribeProgress: done >= total ? null : { done, total, etaSec } });
+          break;
+        }
         case "error":
           set({ error: e.message });
           break;
@@ -142,4 +160,6 @@ export const useAudioStore = create<AudioStore>((set) => ({
       set({ finalizing: false });
     }
   },
+
+  clearTranscribeProgress: () => set({ transcribeProgress: null }),
 }));

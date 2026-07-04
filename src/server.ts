@@ -25,6 +25,12 @@ import { GeminiLlmService } from "./services/GeminiLlmService";
 import { GroqLlmService } from "./services/GroqLlmService";
 import { FallbackLlmService } from "./services/FallbackLlmService";
 import type { LlmService } from "./services/llm/types";
+import { parseWavPcm } from "./services/wavChunk";
+import { transcribeChunked, type ChunkTranscriber } from "./services/transcribePipeline";
+import { decodeToWav16kMono } from "./services/AudioDecoder";
+import { analyzeTranscript, type AnalyzeLike } from "./services/analyzePipeline";
+import { selectRelevantContext } from "./services/relevance";
+import { translateChunked } from "./services/translatePipeline";
 import { SystemAudioCapture } from "./services/audio/SystemAudioCapture";
 import { PhoneBridgeServer } from "./services/audio/PhoneBridgeServer";
 import { Agc } from "./services/audio/Agc";
@@ -139,25 +145,38 @@ if (groq && llm instanceof GeminiLlmService) {
 // 文字 AI（聊天 + 客製匯出）：geminiStt 為主、groq 為援（無 groq 則退回純 geminiStt）。
 const textAi = geminiStt && groq ? new FallbackLlmService(geminiStt, groq) : geminiStt;
 
-// 整檔精修（聽音訊）：Gemini 主力（繁體/發言人/時間戳品質最佳）→ 失敗自動改 Groq Whisper 後援。
+// 每段 ~3 分鐘：落在 Gemini inline 安全上限內（避開較不穩的 Files API），Groq 單次也吃得下；
+// 切小 → 更快看到第一段完成、進度更細，並可多段並行加速（見 transcribePipeline）。
+const TRANSCRIBE_CHUNK_BYTES = 6 * 1024 * 1024;
+
+// AI 助理聊天帶入的逐字稿上限（字）：超過只帶與問題相關片段 → 省額度＋不撞 Groq 後援 12000 TPM。
+const CHAT_CONTEXT_MAX_CHARS = 5000;
+
+// 整檔精修/匯入轉錄（聽音訊）：任意格式音訊 → 非 PCM16 WAV 先用 ffmpeg 轉 16k 單聲道 →
+// 切段 → 每段 Gemini 主力（繁體/發言人/時間戳品質最佳）、失敗 per-chunk Groq Whisper 後援 →
+// 時間戳位移接回。單段全敗只補缺漏標記、不拖垮整檔；只有全部段皆敗才拋。onProgress 回報分段進度。
 async function transcribeWithFallback(
-  audioBase64: string,
-  mimeType: string,
+  audio: Buffer,
+  _mimeType: string, // 保留簽名（呼叫端傳 MIME）；ffmpeg 依實際內容辨識格式，不需靠 MIME
   lang: TranscribeLang,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<string> {
-  if (geminiStt) {
-    try {
-      return await geminiStt.transcribeAudio(audioBase64, mimeType, lang);
-    } catch (e) {
-      if (!groq) throw e;
-      console.warn(
-        `[fallback] 整檔精修主力(Gemini)失敗，改用 Groq Whisper：${e instanceof Error ? e.message : String(e)}`,
-      );
-      return await groq.transcribeAudio(audioBase64, mimeType, lang);
-    }
+  const primary: ChunkTranscriber | null = geminiStt
+    ? (b64, mt, l) => geminiStt.transcribeAudio(b64, mt, l)
+    : null;
+  const fb: ChunkTranscriber | null = groq ? (b64, mt, l) => groq.transcribeAudio(b64, mt, l) : null;
+  if (!primary && !fb) {
+    throw new AppError(ErrorCode.CONFIG_MISSING, "整檔精修需要 GEMINI_API_KEY 或 GROQ_API_KEY");
   }
-  if (groq) return await groq.transcribeAudio(audioBase64, mimeType, lang);
-  throw new AppError(ErrorCode.CONFIG_MISSING, "整檔精修需要 GEMINI_API_KEY 或 GROQ_API_KEY");
+  // 確保是可切段的 PCM16 WAV（M4A/MP3/WebM… 先用 ffmpeg 轉檔，ffmpeg 依實際內容辨識格式不靠 MIME；
+  // 收音產生的 16k 單聲道 WAV 已是 PCM16，直接用不重編碼）。
+  const wav = parseWavPcm(audio) ? audio : await decodeToWav16kMono(audio);
+  return transcribeChunked(wav, lang, {
+    primary: primary ?? fb!,
+    fallback: primary ? fb ?? undefined : undefined,
+    chunkBytes: TRANSCRIBE_CHUNK_BYTES,
+    onProgress,
+  });
 }
 
 // ─────────────── 雙源收音引擎 ───────────────
@@ -376,9 +395,11 @@ app.post(
       ? await vectorStore.queryHistoricalContext(currentTranscript, historyLimit)
       : "";
 
-    // 支援的 provider（Gemini）用 analyzeAll 一次回兩者，省一半請求；否則分別呼叫。
-    const { analysis, actionItems } = llm.analyzeAll
-      ? await llm.analyzeAll(currentTranscript, historicalContext)
+    // 支援 analyzeAll 的 provider（Gemini/Groq）：走 map-reduce（長逐字稿分段摘要再合併，
+    // 避免整份一次送撞 Groq 每分鐘 token 上限；短則單次，行為不變）。否則分別呼叫。
+    const analyzeAll = llm.analyzeAll?.bind(llm);
+    const { analysis, actionItems } = analyzeAll
+      ? await analyzeTranscript({ analyzeAll } as AnalyzeLike, currentTranscript, historicalContext)
       : await Promise.all([
           llm.generateProactiveAnalysis(currentTranscript, historicalContext),
           llm.extractActionItems(currentTranscript),
@@ -399,7 +420,31 @@ app.post(
       lang?: TranscribeLang;
     };
     if (!audio) throw new AppError(ErrorCode.INVALID_INPUT, "缺少 audio（base64）");
-    const transcript = await transcribeWithFallback(audio, mimeType ?? "audio/wav", lang ?? "auto");
+    const transcript = await transcribeWithFallback(
+      Buffer.from(audio, "base64"),
+      mimeType ?? "audio/wav",
+      lang ?? "auto",
+      (done, total) => broadcast({ type: "transcribe_progress", done, total }),
+    );
+    res.json({ transcript });
+  }),
+);
+
+// 匯入外部音檔（手機 M4A/MP3…）：原始位元組直接上傳（不經 base64/JSON，無 50MB 上限）→
+// ffmpeg 轉 16k 單聲道 → 分段混合轉錄。lang/mime 走 query string。
+app.post(
+  "/transcribe/file",
+  express.raw({ type: () => true, limit: "1024mb" }),
+  wrap(async (req, res) => {
+    const bytes = req.body as Buffer;
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+      throw new AppError(ErrorCode.INVALID_INPUT, "缺少音檔內容");
+    }
+    const lang = (typeof req.query.lang === "string" ? req.query.lang : "auto") as TranscribeLang;
+    const mime = typeof req.query.mime === "string" ? req.query.mime : "application/octet-stream";
+    const transcript = await transcribeWithFallback(bytes, mime, lang, (done, total) =>
+      broadcast({ type: "transcribe_progress", done, total }),
+    );
     res.json({ transcript });
   }),
 );
@@ -418,7 +463,9 @@ app.post(
       throw new AppError(ErrorCode.CONFIG_MISSING, "AI 助理需要 GEMINI_API_KEY，請於 .env 設定");
     }
     const memory = await vectorStore.queryHistoricalContext(question, 3).catch(() => "");
-    const result = await textAi.chat(question, transcript ?? "", memory, history ?? []);
+    // 長逐字稿只帶「與問題相關的片段」：省額度（不每句重送整份）＋不撞 Groq 後援 TPM 上限。
+    const context = selectRelevantContext(transcript ?? "", question, CHAT_CONTEXT_MAX_CHARS);
+    const result = await textAi.chat(question, context, memory, history ?? []);
     res.json(result); // { answer, suggestions }
   }),
 );
@@ -558,7 +605,12 @@ app.post(
     if (!transcript || !targetLanguage) {
       throw new AppError(ErrorCode.INVALID_INPUT, "transcript 與 targetLanguage 為必填");
     }
-    const translated = await llm.translateWithTimestamps(transcript, targetLanguage);
+    // 長逐字稿逐批翻（保留每一行）→ 不撞 Groq 後援 TPM 上限；短則單批，行為不變。
+    const translated = await translateChunked(
+      (t, lang) => llm.translateWithTimestamps(t, lang),
+      transcript,
+      targetLanguage,
+    );
     res.json({ translated });
   }),
 );
@@ -638,7 +690,9 @@ app.post(
     if (!wav) {
       throw new AppError(ErrorCode.INVALID_INPUT, "沒有可精修的收音（請先用手機/電腦收音並按停止）");
     }
-    const transcript = await transcribeWithFallback(wav.toString("base64"), "audio/wav", lang ?? "auto");
+    const transcript = await transcribeWithFallback(wav, "audio/wav", lang ?? "auto", (done, total) =>
+      broadcast({ type: "transcribe_progress", done, total }),
+    );
     // 只有精修成功才清空緩衝；失敗（限流/斷網）保留錄音讓使用者重試。
     audioRouter.clearRecording();
     res.json({ transcript });

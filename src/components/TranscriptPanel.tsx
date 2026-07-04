@@ -7,30 +7,33 @@
 //     本面板只保留「匯入既有音檔」與文字編修，不再自行開麥克風。
 
 import { useEffect, useRef, useState } from "react";
-import { translate, transcribe } from "../lib/api";
+import { translate, transcribeFile } from "../lib/api";
 import type { TargetLanguage, TranscribeLang } from "../shared/types";
 
 interface TranscriptPanelProps {
   value: string;
   onChange: (v: string) => void;
-  /** 匯入轉錄進行中回報給父層（用來判斷工作階段、寫回原場）。 */
+  /** 匯入轉錄進行中回報給父層（用來判斷工作階段、擋切換會議）。 */
   onBusyChange?: (busy: boolean) => void;
-  /** 一段新轉錄文字（匯入結果）；交父層併入正確會議＋套用發言人改名。 */
-  onRecordedText?: (text: string) => void;
+  /** 匯入音檔的轉錄結果；交父層併入「目前」會議＋套用發言人改名（不走錄音 origin 路由）。 */
+  onImportedText?: (text: string) => void;
   /** 發言人改名（原名→新名）。 */
   onRenameSpeaker?: (from: string, to: string) => void;
   /** 目前已套用的發言人改名對應（顯示用）。 */
   speakerMap?: Record<string, string>;
 }
 
-/** File → base64（去掉 data: 前綴），供匯入音檔轉錄。 */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
-    reader.onerror = () => reject(new Error("讀取檔案失敗"));
-    reader.readAsDataURL(file);
-  });
+/** 正規化匯入音檔的 MIME：瀏覽器對 M4A 常回空字串或 audio/x-m4a；依副檔名補正。 */
+function normalizeMime(file: File): string {
+  const t = (file.type || "").toLowerCase();
+  if (t && t !== "application/octet-stream" && t !== "audio/x-m4a") return t;
+  const ext = file.name.toLowerCase().split(".").pop() ?? "";
+  const map: Record<string, string> = {
+    m4a: "audio/mp4", mp4: "audio/mp4", aac: "audio/aac", mp3: "audio/mpeg",
+    wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg",
+    webm: "audio/webm", flac: "audio/flac", "3gp": "audio/3gpp", amr: "audio/amr",
+  };
+  return map[ext] ?? "application/octet-stream";
 }
 
 /** 翻譯目標語言選項（代碼 → 顯示名）。 */
@@ -45,7 +48,7 @@ export default function TranscriptPanel({
   value,
   onChange,
   onBusyChange,
-  onRecordedText,
+  onImportedText,
   onRenameSpeaker,
   speakerMap,
 }: TranscriptPanelProps) {
@@ -62,13 +65,6 @@ export default function TranscriptPanel({
     onBusyChange?.(importing);
   }, [importing, onBusyChange]);
 
-  /** 新轉錄文字交父層處理（併入正確會議＋發言人改名）；沒接 onRecordedText 才本地併入。 */
-  function emitText(text: string) {
-    if (!text) return;
-    if (onRecordedText) onRecordedText(text);
-    else onChange(value.trim() ? value.trimEnd() + "\n" + text : text);
-  }
-
   function promptRenameSpeaker() {
     const from = window.prompt("要改哪個發言人？（輸入目前顯示的名稱，例如 發言人1）");
     if (!from?.trim()) return;
@@ -77,7 +73,8 @@ export default function TranscriptPanel({
     onRenameSpeaker?.(from, to);
   }
 
-  // 匯入音檔（例如手機錄好的檔）→ 上傳轉錄 → 接到逐字稿框，之後即可分析。
+  // 匯入音檔（例如手機錄好的 M4A）→ 原始位元組直接上傳（不經 base64/JSON，無大小上限）
+  // → 後端 ffmpeg 轉檔 + 分段混合轉錄 → 併入「目前」會議（不走錄音 origin 路由）。
   async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // 清掉以便能再選同一個檔
@@ -85,9 +82,9 @@ export default function TranscriptPanel({
     setError(null);
     setImporting(true);
     try {
-      const base64 = await fileToBase64(file);
-      const r = await transcribe({ audio: base64, mimeType: file.type || "audio/mpeg", lang: transLang });
-      emitText(r.transcript.trim());
+      const r = await transcribeFile(file, normalizeMime(file), transLang);
+      const text = r.transcript.trim();
+      if (text) onImportedText?.(text);
     } catch (e) {
       setError(e instanceof Error ? e.message : "匯入轉錄失敗");
     } finally {

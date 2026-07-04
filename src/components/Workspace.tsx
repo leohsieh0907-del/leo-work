@@ -80,6 +80,12 @@ function defaultMeetingDate(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/** 預估剩餘秒數 → 「N分N秒」/「N秒」。 */
+function fmtEta(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  return s >= 60 ? `${Math.floor(s / 60)}分${s % 60}秒` : `${s}秒`;
+}
+
 export default function Workspace() {
   const [transcript, setTranscript] = useState("");
   // meetingId＝穩定識別（建立後不變、唯一，存檔/記憶都靠它）；meetingTitle＝可改的顯示名。
@@ -118,6 +124,8 @@ export default function Workspace() {
     recordingTruncated,
     finalizing,
     finalizeRecording,
+    transcribeProgress,
+    clearTranscribeProgress,
   } = useAudioStore();
   const [routerLang, setRouterLang] = useState<TranscribeLang>("auto");
   const [importError, setImportError] = useState<string | null>(null);
@@ -157,6 +165,11 @@ export default function Workspace() {
     }
     if (!recordingReady) autoFinalizedRef.current = false; // 下一段收音可再自動精修
   }, [recordingReady, finalizing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 匯入/精修結束（成功或失敗）就收掉進度條，避免半途失敗時卡在畫面上。
+  useEffect(() => {
+    if (!micBusy && !finalizing) clearTranscribeProgress();
+  }, [micBusy, finalizing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleImportRecording(isRetry = false) {
     setImportError(null);
@@ -233,6 +246,13 @@ export default function Workspace() {
     } else {
       setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
     }
+  }
+
+  /** 匯入音檔轉錄結果：套發言人改名後併入「目前」會議。前景操作，不走 origin 路由（避免靜默送去別場）。 */
+  function handleImportedText(raw: string) {
+    const text = applySpeakerMap(raw.trim());
+    if (!text) return;
+    setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
   }
 
   /** 發言人改名：整份替換 ＋ 記住對應供之後併入的新逐字稿自動套用。 */
@@ -467,6 +487,39 @@ export default function Workspace() {
           </div>
         )}
 
+        {/* 分段轉錄進度條（匯入音檔 / 收音整檔精修共用；全寬、逐字稿上方）。
+            單段檔無法顯示分段進度 → 用脈動動畫表示「處理中」；多段檔顯示實際百分比。 */}
+        {transcribeProgress &&
+          (() => {
+            const { done, total, etaSec } = transcribeProgress;
+            const multi = total > 1;
+            const pct = multi ? Math.round((done / total) * 100) : 0;
+            return (
+              <div className="mb-3 shrink-0 rounded-lg border border-line bg-brand-panel/40 p-3">
+                <div className="mb-1.5 flex items-center justify-between text-xs">
+                  <span className="font-medium text-fg">
+                    🎧 轉錄中…{multi ? ` 已完成 ${done}/${total} 段` : "（處理中，請稍候）"}
+                  </span>
+                  <span className="text-fg-subtle">
+                    {multi ? `${pct}%` : ""}
+                    {etaSec > 0 && `　預估剩餘 ${fmtEta(etaSec)}`}
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-brand-dark/50">
+                  <div
+                    className={
+                      multi
+                        ? "h-full animate-pulse rounded-full bg-emerald-500 transition-all duration-300"
+                        : "h-full w-2/5 animate-pulse rounded-full bg-emerald-500"
+                    }
+                    // 多段：最小留 6% 讓 0/N 時也看得到一截在脈動（不是死掉）。
+                    style={multi ? { width: `${Math.max(pct, 6)}%` } : undefined}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
         {/* 主體：左逐字稿、右分析 */}
         <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-2">
           <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-brand-panel/40 p-4">
@@ -474,7 +527,7 @@ export default function Workspace() {
               value={transcript}
               onChange={setTranscript}
               onBusyChange={setMicBusy}
-              onRecordedText={routeRecordedText}
+              onImportedText={handleImportedText}
               onRenameSpeaker={handleRenameSpeaker}
               speakerMap={speakerMap}
             />

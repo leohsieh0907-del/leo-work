@@ -80,6 +80,33 @@ export function transcribe(req: {
   return post("/transcribe", req);
 }
 
+/**
+ * 匯入外部音檔（手機 M4A/MP3…）：原始位元組直接上傳（不經 base64/JSON，支援任意大小），
+ * 後端 ffmpeg 轉檔 → 分段混合轉錄。進度經 /events 的 transcribe_progress 事件回流。
+ */
+export async function transcribeFile(
+  file: Blob,
+  mime: string,
+  lang: TranscribeLang,
+): Promise<{ transcript: string }> {
+  const qs = `?lang=${encodeURIComponent(lang)}&mime=${encodeURIComponent(mime)}`;
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE}/transcribe/file${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+  } catch {
+    throw new Error("無法連線到本機服務（sidecar 尚未啟動？）");
+  }
+  if (!resp.ok) {
+    const err = (await resp.json().catch(() => null)) as ApiErrorBody | null;
+    throw new Error(err?.error?.message ?? `匯入轉錄失敗（${resp.status}）`);
+  }
+  return (await resp.json()) as { transcript: string };
+}
+
 /** AI 助理對話（結合當前逐字稿 + 跨會議記憶）。 */
 export function chat(req: {
   question: string;
