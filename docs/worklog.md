@@ -6,6 +6,16 @@
 
 ---
 
+## 2026-07-05 — v0.1.22：手機收音自簽憑證 SAN 修正（修 iOS 判「憑證無效」）
+
+### ✅ 做了什麼（commit `e5b6d08`）
+- **#4.1 手機收音「三修」逐項對現有程式碼確認**——你這份清單是「收音來源合一」重構(2026-06-28)前寫的，重構後：
+  - **② 連線死結（開始收音鍵 disabled=!phoneConnected）＝已不存在**：RouterBar 點「📱手機收音」直接 `activate()`、只 `busy` 時 disabled，無 phoneConnected 閘。
+  - **③ 撈錯緩衝（phoneRecordedChunks vs audioRouter）＝已不存在**：手機是 router 的 `webrtc` 來源(`phoneSource`)，音訊走同一 `recordedChunks`，`/router/transcribe` 讀的就是它。
+  - **① 憑證 SAN ＝真的還缺、本次補**：`PhoneBridgeServer` 自簽憑證原只設 `commonName`，**現代 iOS/Safari 只認 SAN**→ 手機判「憑證無效」擋 wss。
+- **修法**：新增 `certAltNames()` 組 SAN（localhost(DNS)+127.0.0.1+`listLanIps()` 所有區網 IPv4，去重）；`selfsigned.generate` 的 `extensions` 加 `basicConstraints/keyUsage/extKeyUsage(serverAuth)/subjectAltName`。每次 boot 重產、未持久化→天生最新無舊壞檔。
+- **驗證**：typecheck ×2、**vitest 124**、node-forge 解析實際憑證確認 SAN(3 altNames)+serverAuth 皆入。**「iPhone 真的連上」需本人手機測**（自簽仍會跳一次「不受信任」需點繼續，但這次點得下去；且外部兩道牆 McAfee/AP 隔離仍要處理）。
+
 ## 2026-07-04 — v0.1.21：匯入音檔可靠性大改 + 長逐字稿全面支援（分析/聊天/翻譯不再撞 Groq TPM）
 
 ### ✅ 做了什麼（起因：庭晰回報匯入手機 M4A 常轉不出/大檔靜默失敗，接著長逐字稿分析/聊天連撞 Groq 上限）
