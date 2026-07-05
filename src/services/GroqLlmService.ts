@@ -79,6 +79,11 @@ export function formatWhisperSegments(segments: { start?: number; text?: string 
     .join("\n");
 }
 
+/** 粗判文字是否含拉丁字母詞（英文等）→ auto 模式才需補中譯，全中文可省一次 API。 */
+export function hasLatinText(text: string): boolean {
+  return /[A-Za-z]{2,}/.test(text);
+}
+
 function toStrArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter((s) => s.length > 0);
   if (typeof v === "string" && v.trim()) return [v.trim()];
@@ -290,7 +295,31 @@ export class GroqLlmService implements LlmService {
     if (!out) {
       throw new AppError(ErrorCode.CLAUDE_API_ERROR, "Groq Whisper 轉錄回應為空（音訊太短或格式不支援）");
     }
-    return out;
+    // auto 模式與 Gemini 對齊：Whisper 只轉原文，這裡把非中文的行補上（繁中翻譯）→ 維持「中英並進」。
+    return lang === "auto" ? this.annotateBilingualAuto(out) : out;
+  }
+
+  /**
+   * auto 模式雙語標註：把「非中文的行」補上行尾（繁中翻譯），與 Gemini auto 的中英並進格式一致。
+   * 全中文或過長則跳過（省 API / 防呆）；標註失敗回原文保底（不影響轉錄結果）。
+   * 註：轉錄管線每段音訊都很小（~3 分），標註輸入不會撞 Groq TPM。
+   */
+  private async annotateBilingualAuto(transcript: string): Promise<string> {
+    if (!hasLatinText(transcript) || transcript.length > 12000) return transcript;
+    const system =
+      "你是逐字稿雙語標註員。輸入為 `[mm:ss] 發言人: 內容` 的逐字稿。嚴格規則：\n" +
+      "① 每行開頭的 `[mm:ss]` 與「發言人:」原樣保留；② 原文內容一字不改（不可翻譯掉或改寫原文）；\n" +
+      "③ 只要該行內容不是中文，就在該行行尾緊接一組全形括號的繁體中文翻譯，例：`Let's ship it.（我們來上線。）`；\n" +
+      "④ 原文已是中文的行不要動、不加括號；⑤ 不增刪合併任何行、不輸出任何說明，直接輸出處理後逐字稿。";
+    try {
+      const raw = await this.complete(
+        [{ role: "system", content: system }, { role: "user", content: transcript }],
+        false,
+      );
+      return raw.trim() || transcript;
+    } catch {
+      return transcript;
+    }
   }
 
   /** 單段請求 Groq Whisper，回傳解析後資料（segments/text）。 */

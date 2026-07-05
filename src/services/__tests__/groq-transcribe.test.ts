@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatWhisperSegments } from "../GroqLlmService";
+import { formatWhisperSegments, hasLatinText } from "../GroqLlmService";
 
 describe("formatWhisperSegments（Groq Whisper 後援轉錄格式化）", () => {
   it("把 segments 轉成 `[mm:ss] 發言人: 內容` 逐行、收掉前後空白", () => {
@@ -30,5 +30,16 @@ describe("formatWhisperSegments（Groq Whisper 後援轉錄格式化）", () => 
 
   it("無 segments 回空字串（讓上層退回 data.text 或報空）", () => {
     expect(formatWhisperSegments([])).toBe("");
+  });
+});
+
+describe("hasLatinText（auto 模式是否需補中譯的粗判）", () => {
+  it("含英文詞 → true（會觸發雙語標註）", () => {
+    expect(hasLatinText("[00:05] 發言人: Let's ship it next week.")).toBe(true);
+    expect(hasLatinText("這是 API 的說明")).toBe(true);
+  });
+  it("全中文/無拉丁詞 → false（省一次 API）", () => {
+    expect(hasLatinText("[00:05] 發言人: 我們下週上線")).toBe(false);
+    expect(hasLatinText("純中文沒有英文")).toBe(false);
   });
 });
