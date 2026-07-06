@@ -6,6 +6,21 @@
 
 ---
 
+## 2026-07-06 — v0.1.23：錄音自動分段 + Groq 後援 auto 補中譯
+
+### ✅ 做了什麼
+- **Groq 後援 auto 模式補中譯（commit `b811e72`）**：Gemini 忙不過來轉 Groq 時，auto 模式原本只出英文原文、沒補中譯 → 與 Gemini「中英並進」不一致。`GroqLlmService.transcribeAudio(auto)` 轉錄後跑一次雙語標註（`annotateBilingualAuto`）：非中文行行尾補（繁中翻譯）、中文行不動；`hasLatinText` 全中文跳過省 API、過長跳過防呆、失敗回原文。真 Groq 端到端驗過。
+- **錄音自動分段（commit `5b9b354`）**：錄音緩衝硬上限 60 分，超過會截斷掉內容。改成錄到 **45 分自動「背景抽取」**——`AudioIngestionRouter` 累積達門檻(`autoSegmentSeconds`，deps 可覆寫) → `onSegmentReady` → server **同步** `drainRecordingWav()` 取走該段（緩衝清空、**收音不中斷不掉音**）→ 背景整檔精修 → `shiftTimestamps` 位移接續 → broadcast `segment_transcript` → 前端 `routeSessionText(consume=false)` 併入會議。`drainedSeconds` 累計位移，最終段 `/router/transcribe` 也位移接續（沒分段時 offset=0 行為不變）。60 分硬上限保留為安全網；新 session 位移歸零。
+- 使用者提問釐清：**會議建議每 45~50 分停一次**（60 分硬上限）——現在有自動分段就不必手動停了；**auto 模式＝中英並進**（英文原文+全形括號繁中譯），一律繁中＝只中文。
+
+### 驗證結果
+- typecheck ×2、**vitest 129**（+雙語標註 hasLatinText、+路由自動分段 3：觸發/位移累加/session歸零/無回呼不觸發）、vite build 全綠。
+- 真 API 端到端：Groq 雙語標註（英文補中譯、中文原樣、全中文跳過）；自動分段核心走單元測試（真 45 分實跑待庭晰實機確認，有 60 分安全網兜底）。
+
+### 現況 / 待辦
+- 發版 v0.1.23（tag→CI→OTA）進行中。**自動分段的完整實跑**建議庭晰實際錄一場 >45 分的長會議確認。
+- 手機收音仍需外部兩道牆（McAfee `mc-fw-host`＋路由器 AP 隔離）才連得上。
+
 ## 2026-07-05 — v0.1.22：手機收音自簽憑證 SAN 修正（修 iOS 判「憑證無效」）
 
 ### ✅ 做了什麼（commit `e5b6d08`）
