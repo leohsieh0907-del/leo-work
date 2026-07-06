@@ -126,7 +126,9 @@ export default function Workspace() {
     finalizeRecording,
     transcribeProgress,
     clearTranscribeProgress,
+    autoSegment,
   } = useAudioStore();
+  const lastSegmentSeqRef = useRef(0); // 已處理的自動分段序號（去重，避免重複帶入）
   const [routerLang, setRouterLang] = useState<TranscribeLang>("auto");
   const [importError, setImportError] = useState<string | null>(null);
 
@@ -171,6 +173,14 @@ export default function Workspace() {
     if (!micBusy && !finalizing) clearTranscribeProgress();
   }, [micBusy, finalizing]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 自動分段：背景精修出的一段（時間戳已接續）→ 併入會議（不消耗 origin ref，錄音續進行）。
+  useEffect(() => {
+    if (autoSegment && autoSegment.seq !== lastSegmentSeqRef.current) {
+      lastSegmentSeqRef.current = autoSegment.seq;
+      void routeSessionText(autoSegment.text, false);
+    }
+  }, [autoSegment]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleImportRecording(isRetry = false) {
     setImportError(null);
     try {
@@ -209,10 +219,11 @@ export default function Workspace() {
    * 把一段新轉錄文字併入正確的會議（先套用發言人改名）：
    *  - 錄音中途切去看別場 → 寫回「開始錄音那場」並存檔，不污染目前檢視。
    *  - 否則 → 併入目前逐字稿。
+   * consume：true＝最終段（取用即消耗 origin ref、清發言人對應）；false＝自動分段（保留 ref，可再接續）。
    */
-  async function routeRecordedText(raw: string) {
+  async function routeSessionText(raw: string, consume: boolean) {
     const origin = recordingOriginRef.current;
-    recordingOriginRef.current = null; // 取用即消耗
+    if (consume) recordingOriginRef.current = null;
     const text = applySpeakerMap(raw.trim());
     if (!text) return;
     if (origin && origin.id !== meetingId) {
@@ -231,6 +242,7 @@ export default function Workspace() {
       };
       try {
         await persistMeeting(saved);
+        origin.transcript = merged; // 累積：後續自動分段/最終段接在這之後，不覆蓋
         setRecordingNotice(`🎙 錄音已自動存入會議「${origin.title}」（你正在看別場，未打斷）`);
         setHistoryKey((k) => k + 1);
       } catch (e) {
@@ -240,12 +252,19 @@ export default function Workspace() {
           `⚠️ 錄音無法寫回「${origin.title}」（${e instanceof Error ? e.message : "未知錯誤"}），已暫放在目前逐字稿，請手動搬到正確會議。`,
         );
       }
-      // 寫回別場後本次工作階段結束，清掉發言人對應（目前畫面已是另一場）。
-      speakerMapRef.current = {};
-      setSpeakerMap({});
+      // 最終段寫回別場後工作階段結束，清掉發言人對應（目前畫面已是另一場）。自動分段不清（session 續）。
+      if (consume) {
+        speakerMapRef.current = {};
+        setSpeakerMap({});
+      }
     } else {
       setTranscript((prev) => (prev.trim() ? prev.trimEnd() + "\n" + text : text));
     }
+  }
+
+  /** 最終段（停止後整檔精修）：取用即消耗 origin ref。 */
+  async function routeRecordedText(raw: string) {
+    return routeSessionText(raw, true);
   }
 
   /** 匯入音檔轉錄結果：套發言人改名後併入「目前」會議。前景操作，不走 origin 路由（避免靜默送去別場）。 */

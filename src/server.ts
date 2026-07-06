@@ -26,7 +26,7 @@ import { GroqLlmService } from "./services/GroqLlmService";
 import { FallbackLlmService } from "./services/FallbackLlmService";
 import type { LlmService } from "./services/llm/types";
 import { parseWavPcm } from "./services/wavChunk";
-import { transcribeChunked, type ChunkTranscriber } from "./services/transcribePipeline";
+import { transcribeChunked, shiftTimestamps, type ChunkTranscriber } from "./services/transcribePipeline";
 import { decodeToWav16kMono } from "./services/AudioDecoder";
 import { analyzeTranscript, type AnalyzeLike } from "./services/analyzePipeline";
 import { selectRelevantContext } from "./services/relevance";
@@ -256,6 +256,25 @@ const audioRouter = new AudioIngestionRouter({
   transcriber: routerTranscriber,
   onEvent: broadcast,
 });
+
+// 自動分段：錄音累積達門檻(45 分) → router 觸發 → **同步** drain 這段（收音不中斷、不掉音）→
+// 背景整檔精修（位移時間戳接續，lang=auto 與預設一致）→ 推 segment_transcript 給前端接續帶入會議。
+audioRouter.onSegmentReady = () => {
+  const seg = audioRouter.drainRecordingWav();
+  if (!seg || seg.wav.length === 0) return;
+  void (async () => {
+    try {
+      const text = await transcribeWithFallback(seg.wav, "audio/wav", "auto");
+      const shifted = shiftTimestamps(text, seg.offsetSec);
+      if (shifted.trim()) broadcast({ type: "segment_transcript", text: shifted });
+    } catch (e) {
+      broadcast({
+        type: "error",
+        message: `自動分段精修失敗（該段可稍後手動補）：${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  })();
+};
 
 /**
  * 藍牙同步完成後的批次摘要（best-effort）：
@@ -688,11 +707,18 @@ app.post(
     const { lang } = req.body as { lang?: TranscribeLang };
     const wav = audioRouter.peekRecordingWav();
     if (!wav) {
+      // 先前已自動分段抽走內容時，停止瞬間緩衝可能剛好為空 → 不算錯（內容已由 segment_transcript 帶入），回空。
+      if (audioRouter.recordingOffsetSeconds > 0) {
+        res.json({ transcript: "" });
+        return;
+      }
       throw new AppError(ErrorCode.INVALID_INPUT, "沒有可精修的收音（請先用手機/電腦收音並按停止）");
     }
-    const transcript = await transcribeWithFallback(wav, "audio/wav", lang ?? "auto", (done, total) =>
+    let transcript = await transcribeWithFallback(wav, "audio/wav", lang ?? "auto", (done, total) =>
       broadcast({ type: "transcribe_progress", done, total }),
     );
+    // 最終段時間戳位移，接續先前自動分段（沒分段時 offset=0，行為不變）。
+    transcript = shiftTimestamps(transcript, audioRouter.recordingOffsetSeconds);
     // 只有精修成功才清空緩衝；失敗（限流/斷網）保留錄音讓使用者重試。
     audioRouter.clearRecording();
     res.json({ transcript });

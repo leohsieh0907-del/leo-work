@@ -351,6 +351,8 @@ export type AudioEvent =
   | { type: "transcript"; segments: { start: number; end: number; text: string }[] }
   // 整檔精修/匯入轉錄的分段進度（done 從 1 到 total；前端畫進度條）
   | { type: "transcribe_progress"; done: number; total: number }
+  // 自動分段：錄音達門檻時背景精修出一段（已位移時間戳），前端接續帶入會議
+  | { type: "segment_transcript"; text: string }
   | { type: "error"; message: string }
   // 收音整檔精修：前景 session 停止後，回報這段錄音是否可精修帶入會議
   | { type: "recording"; ready: boolean; seconds: number; truncated: boolean }

@@ -126,8 +126,8 @@ class FakeTranscriber {
   }
 }
 
-/** 一次組好 router + 假源 + 事件收集器，方便各測試取用。 */
-function makeHarness() {
+/** 一次組好 router + 假源 + 事件收集器，方便各測試取用。opts.autoSegmentSeconds 可調自動分段門檻。 */
+function makeHarness(opts?: { autoSegmentSeconds?: number }) {
   FakeSource.order = [];
   const bluetooth = new FakeSource("bluetooth");
   const webrtc = new FakeSource("webrtc");
@@ -144,6 +144,7 @@ function makeHarness() {
     agc: new Agc(),
     transcriber: transcriber as unknown as never,
     onEvent: (e) => events.push(e),
+    autoSegmentSeconds: opts?.autoSegmentSeconds,
   };
   const router = new AudioIngestionRouter(deps);
   return { router, bluetooth, webrtc, local, mic, transcriber, events };
@@ -530,5 +531,54 @@ describe("整檔精修錄音緩衝", () => {
 
     bluetooth.emitData(squareChunk(0, 0.3, 256));
     expect(router.hasRecording()).toBe(false);
+  });
+});
+
+// ════════════════ 自動分段（背景抽取）════════════════
+
+describe("自動分段 auto-segment", () => {
+  it("錄音達門檻 → onSegmentReady 觸發、drain 回 WAV + offset，緩衝清空後接續累加時間戳", async () => {
+    // 門檻 0.5 秒＝8000 樣本（16kHz）；每次餵 8000 樣本剛好觸發一段。
+    const { router, local } = makeHarness({ autoSegmentSeconds: 0.5 });
+    const drained: { wav: Buffer; offsetSec: number }[] = [];
+    router.onSegmentReady = () => {
+      const seg = router.drainRecordingWav();
+      if (seg) drained.push(seg);
+    };
+    await router.activate("local");
+
+    // 第一段：8000 樣本 → 觸發 → drain（offset=0），緩衝清空。
+    local.emitData(squareChunk(0, 0.3, 8000));
+    expect(drained).toHaveLength(1);
+    expect(drained[0].offsetSec).toBe(0);
+    expect(drained[0].wav.length).toBe(44 + 8000 * 2); // WAV header + PCM16
+    expect(router.hasRecording()).toBe(false); // 抽走後緩衝空
+
+    // 第二段：再 8000 樣本 → 第二段 offset = 0.5s（接續，不從 0 重來）。
+    local.emitData(squareChunk(1, 0.3, 8000));
+    expect(drained).toHaveLength(2);
+    expect(drained[1].offsetSec).toBeCloseTo(0.5, 5);
+    // 累計位移 = 兩段共 1 秒（最終段精修會用它接續）。
+    expect(router.recordingOffsetSeconds).toBeCloseTo(1.0, 5);
+  });
+
+  it("新 session（重新 activate）→ 累計位移歸零", async () => {
+    const { router, local } = makeHarness({ autoSegmentSeconds: 0.5 });
+    router.onSegmentReady = () => void router.drainRecordingWav();
+    await router.activate("local");
+    local.emitData(squareChunk(0, 0.3, 8000)); // 觸發一段 → drainedSeconds=0.5
+    expect(router.recordingOffsetSeconds).toBeCloseTo(0.5, 5);
+
+    await router.deactivate();
+    await router.activate("local"); // 新 session
+    expect(router.recordingOffsetSeconds).toBe(0); // 歸零，不延續上一場
+  });
+
+  it("未設 onSegmentReady → 不觸發分段（維持累積，走原本 60 分硬上限）", async () => {
+    const { router, local } = makeHarness({ autoSegmentSeconds: 0.5 });
+    await router.activate("local");
+    local.emitData(squareChunk(0, 0.3, 8000)); // 達門檻但沒回呼
+    expect(router.hasRecording()).toBe(true); // 沒被抽走，仍在緩衝
+    expect(router.recordingOffsetSeconds).toBe(0);
   });
 });

@@ -55,8 +55,12 @@ const VU_THROTTLE_MS = 100;
  * 超過上限就停止累積，recording 事件帶 truncated=true 提醒前端「只精修前 N 分鐘」。
  * 注意：Float32 緩衝約 64KB/秒，3600 秒 ≈ 230MB；要再加長需評估記憶體與上傳時間。
  */
-const MAX_RECORD_SECONDS = 3600; // 60 分鐘（線上會議常見長度）
+const MAX_RECORD_SECONDS = 3600; // 60 分鐘（硬上限；設了 onSegmentReady 會在此之前自動分段，不會走到截斷）
 const MAX_RECORD_SAMPLES = MAX_RECORD_SECONDS * TARGET_SAMPLE_RATE;
+
+// 自動分段門檻（秒）預設：錄到這個長度就「背景抽取」——drain 目前緩衝交整檔精修、緩衝清空繼續收音，
+// 使用者不必自己停。留 15 分安全邊際在 60 分硬上限前，且每段精修量適中（不過久/不易撞限流）。可由 deps 覆寫。
+const AUTO_SEGMENT_SECONDS = 2700; // 45 分鐘
 
 /**
  * 前景即時源 flush 轉寫器的週期上限（秒）。
@@ -81,6 +85,8 @@ export interface AudioRouterDeps {
   agc: Agc;
   transcriber?: TranscriberLike;
   onEvent?: (e: AudioEvent) => void;
+  /** 自動分段門檻（秒）；預設 AUTO_SEGMENT_SECONDS。測試可調小以觸發。 */
+  autoSegmentSeconds?: number;
 }
 
 export class AudioIngestionRouter {
@@ -113,12 +119,27 @@ export class AudioIngestionRouter {
   private recordedSamples = 0;
   /** 是否因超過上限而截斷錄音（前端可據以提醒「只精修前 N 分鐘」）。 */
   private recordingTruncated = false;
+  /** 本 session 已被「自動分段」抽走並精修的累計秒數（給後續段/最終段時間戳位移，接續不從 00:00 重來）。 */
+  private drainedSeconds = 0;
+  /** 已觸發自動分段、等待 drain 中（防重複觸發）。 */
+  private segmentPending = false;
+  /**
+   * 自動分段回呼（由 server 設定）：錄音累積達門檻時觸發。
+   * server 應在此**同步** drainRecordingWav() 取走該段，再背景精修＋broadcast，收音期間不中斷。
+   */
+  onSegmentReady?: () => void;
+  /** 自動分段門檻（樣本數）；由 deps.autoSegmentSeconds 覆寫，預設 AUTO_SEGMENT_SECONDS。 */
+  private readonly autoSegmentSamples: number;
 
   /** 每個來源是否已綁定 onDataReceived/onError（避免重複註冊）。 */
   private readonly wiredSources = new WeakSet<AudioSource>();
 
   constructor(deps: AudioRouterDeps) {
     this.deps = deps;
+    this.autoSegmentSamples = Math.max(
+      1,
+      Math.round((deps.autoSegmentSeconds ?? AUTO_SEGMENT_SECONDS) * TARGET_SAMPLE_RATE),
+    );
     // 一次性綁定三個源的資料/錯誤回呼。回呼內部會以 foregroundId 判斷該塊是否
     // 屬於目前前景源——避免在每次 activate/deactivate 重新註冊造成回呼疊加。
     this.wire(deps.webrtc);
@@ -208,6 +229,8 @@ export class AudioIngestionRouter {
     this.deps.transcriber?.reset();
     this.lastVuAt = 0;
     this.resetRecording(); // 新 session 重開精修錄音緩衝
+    this.drainedSeconds = 0; // 新 session 時間戳位移歸零（自動分段接續才不會延續上一場）
+    this.segmentPending = false;
     this.emitRecording(); // 通知前端：尚無可精修的錄音（ready=false）
 
     // 設妥前景指標「之後」才 startStream——資料回呼一旦觸發就能正確認領該塊。
@@ -370,7 +393,32 @@ export class AudioIngestionRouter {
     this.emitRecording();
   }
 
-  /** 累積一塊（AGC 後）PCM；超過上限就停止累積並標記截斷。 */
+  /**
+   * 自動分段用：取走目前累積錄音（編 WAV）**並清空緩衝**（新音訊流入乾淨緩衝繼續錄），
+   * 回這段的時間戳位移（秒，＝先前已抽走的累計）。無錄音回 null。與 peek 不同，peek 不清空。
+   */
+  drainRecordingWav(): { wav: Buffer; offsetSec: number } | null {
+    this.segmentPending = false;
+    if (this.recordedSamples === 0) return null;
+    const merged = new Float32Array(this.recordedSamples);
+    let off = 0;
+    for (const c of this.recordedChunks) {
+      merged.set(c, off);
+      off += c.length;
+    }
+    const offsetSec = this.drainedSeconds;
+    this.drainedSeconds += this.recordedSamples / TARGET_SAMPLE_RATE;
+    this.resetRecording();
+    this.emitRecording(); // 通知前端本段已抽走、緩衝歸零
+    return { wav: encodeWavPcm16(merged, TARGET_SAMPLE_RATE), offsetSec };
+  }
+
+  /** 本 session 已被自動分段抽走的累計秒數（最終段精修時位移時間戳，接續分段）。 */
+  get recordingOffsetSeconds(): number {
+    return this.drainedSeconds;
+  }
+
+  /** 累積一塊（AGC 後）PCM；達自動分段門檻就通知 server 背景抽取；超過硬上限才截斷。 */
   private appendRecording(samples: Float32Array): void {
     if (this.recordedSamples >= MAX_RECORD_SAMPLES) {
       this.recordingTruncated = true;
@@ -378,6 +426,11 @@ export class AudioIngestionRouter {
     }
     this.recordedChunks.push(samples);
     this.recordedSamples += samples.length;
+    // 達門檻 → 通知 server 背景抽取這段（收音不中斷）。設了 onSegmentReady 就不會走到 60 分截斷。
+    if (!this.segmentPending && this.onSegmentReady && this.recordedSamples >= this.autoSegmentSamples) {
+      this.segmentPending = true;
+      this.onSegmentReady();
+    }
   }
 
   /** 清空錄音緩衝（新 session 或取走後）。 */

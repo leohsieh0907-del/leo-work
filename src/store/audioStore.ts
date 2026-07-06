@@ -43,6 +43,9 @@ interface AudioStore {
   /** 分段轉錄進度（匯入/整檔精修共用）；null＝沒有進行中。etaSec＝預估剩餘秒數。 */
   transcribeProgress: { done: number; total: number; etaSec: number } | null;
 
+  /** 自動分段：背景精修出的一段（已位移時間戳）；seq 每段遞增，前端據以接續帶入會議。 */
+  autoSegment: { text: string; seq: number } | null;
+
   /** 連上 /events 並開始接收事件；回傳取消訂閱函式。 */
   connect: () => () => void;
   activate: (id: AudioSourceId) => Promise<void>;
@@ -56,6 +59,8 @@ interface AudioStore {
 
 // 分段轉錄開始時間（算預估剩餘）；module 層即可，非 UI 狀態。
 let progressStartMs = 0;
+// 自動分段序號：每來一段 +1，讓前端 effect 每段都觸發（即使文字碰巧相同）。
+let segmentSeq = 0;
 
 export const useAudioStore = create<AudioStore>((set) => ({
   state: AudioSourceState.DISCONNECTED,
@@ -69,6 +74,7 @@ export const useAudioStore = create<AudioStore>((set) => ({
   recordingTruncated: false,
   finalizing: false,
   transcribeProgress: null,
+  autoSegment: null,
 
   connect: () => {
     return subscribeAudioEvents((e) => {
@@ -101,6 +107,10 @@ export const useAudioStore = create<AudioStore>((set) => ({
           set({ transcribeProgress: done >= total ? null : { done, total, etaSec } });
           break;
         }
+        case "segment_transcript":
+          segmentSeq += 1;
+          set({ autoSegment: { text: e.text, seq: segmentSeq } });
+          break;
         case "error":
           set({ error: e.message });
           break;
