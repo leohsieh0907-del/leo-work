@@ -1,6 +1,6 @@
 // ── 前端 → sidecar 的雙軌路由控制（/router/* 與 /webrtc/*）──
 
-import type { AudioSourceId, RouterStatus, TranscribeLang } from "../shared/types";
+import type { AudioSourceId, OutputStatus, RouterStatus, TranscribeLang } from "../shared/types";
 
 const BASE = "http://127.0.0.1:8765";
 
@@ -15,6 +15,25 @@ async function jsonPost<T>(path: string, body: unknown): Promise<T> {
     throw new Error(e?.error?.message ?? `服務錯誤（${r.status}）`);
   }
   return (await r.json()) as T;
+}
+
+async function jsonGet<T>(path: string): Promise<T> {
+  const r = await fetch(`${BASE}${path}`);
+  if (!r.ok) {
+    const e = (await r.json().catch(() => null)) as { error?: { message?: string } } | null;
+    throw new Error(e?.error?.message ?? `服務錯誤（${r.status}）`);
+  }
+  return (await r.json()) as T;
+}
+
+/** 讀目前系統預設播放裝置模式（耳機錄音模式切換用）。 */
+export function getOutputStatus(): Promise<OutputStatus> {
+  return jsonGet("/audio/output");
+}
+
+/** 切換系統預設播放裝置：normal＝喇叭、record＝CABLE(耳機錄音模式)。 */
+export function setOutputMode(mode: "normal" | "record"): Promise<OutputStatus> {
+  return jsonPost("/audio/output", { mode });
 }
 
 /** 啟用某來源為前景（bluetooth / webrtc / local）。 */

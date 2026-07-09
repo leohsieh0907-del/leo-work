@@ -311,6 +311,16 @@ export type AudioSourceId = "bluetooth" | "webrtc" | "local" | "mic";
 /** 來源優先級（WebRTC 即時串流時，藍牙傳輸降為背景低優先）。 */
 export type SourcePriority = "foreground" | "background";
 
+/** 系統預設「播放」裝置模式：normal＝平常喇叭、record＝錄音用虛擬線(CABLE)、other＝其他裝置、unknown＝查不到/非 Windows。 */
+export type OutputMode = "normal" | "record" | "other" | "unknown";
+
+/** 預設播放裝置狀態（耳機錄音模式切換用）。 */
+export interface OutputStatus {
+  mode: OutputMode;
+  /** 目前預設播放裝置名稱（診斷用；查不到為空字串）。 */
+  deviceName: string;
+}
+
 /** 藍牙斷點續傳進度。 */
 export interface BluetoothTransferStatus {
   connected: boolean;

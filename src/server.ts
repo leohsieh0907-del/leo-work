@@ -24,6 +24,7 @@ import { OllamaLlmService } from "./services/OllamaLlmService";
 import { GeminiLlmService } from "./services/GeminiLlmService";
 import { GroqLlmService } from "./services/GroqLlmService";
 import { FallbackLlmService } from "./services/FallbackLlmService";
+import { AudioOutputSwitch } from "./services/AudioOutputSwitch";
 import type { LlmService } from "./services/llm/types";
 import { parseWavPcm } from "./services/wavChunk";
 import { transcribeChunked, shiftTimestamps, type ChunkTranscriber } from "./services/transcribePipeline";
@@ -192,6 +193,7 @@ function broadcast(event: AudioEvent): void {
 
 // .env SYSTEM_LOOPBACK_DEVICE 可指定系統收音的 loopback 裝置（完整名稱或片段，如 "Voicemeeter Out B1"）；
 // 未設定時 pickLoopback 會自動偏好 VoiceMeeter B1 > CABLE > 任一 VoiceMeeter > 立體聲混音。
+const outputSwitch = new AudioOutputSwitch();
 const systemCapture = new SystemAudioCapture({ loopbackDevice: process.env.SYSTEM_LOOPBACK_DEVICE });
 // 只麥克風來源（面對面會議；不混系統 loopback）。獨立 ffmpeg 實例，與「電腦系統」互斥不衝突。
 const micCapture = new SystemAudioCapture({ micOnly: true });
@@ -725,6 +727,26 @@ app.post(
   }),
 );
 
+// 「耳機錄音模式」：切換系統預設播放裝置（Realtek 喇叭 ↔ CABLE 虛擬線）。
+// mode 由 body 或 query 帶入（query 供前端關閉時用 navigator.sendBeacon 走簡單請求切回）。
+app.get(
+  "/audio/output",
+  wrap(async (_req, res) => {
+    res.json(await outputSwitch.getStatus());
+  }),
+);
+
+app.post(
+  "/audio/output",
+  wrap(async (req, res) => {
+    const mode = ((req.body as { mode?: string })?.mode ?? req.query.mode) as string;
+    if (mode !== "normal" && mode !== "record") {
+      throw new AppError(ErrorCode.INVALID_INPUT, "mode 必須為 normal 或 record");
+    }
+    res.json(await outputSwitch.setMode(mode));
+  }),
+);
+
 // WebRTC 信令：手機 offer → 回 answer
 app.post(
   "/webrtc/offer",
@@ -814,6 +836,9 @@ async function main() {
     console.log(`[sidecar] 已啟動於 http://127.0.0.1:${PORT}（嵌入來源：${EMBED_PROVIDER}）`);
     console.log(`[sidecar] 事件 WebSocket：ws://127.0.0.1:${PORT}/events`);
   });
+
+  // 安全網：若上次關機時卡在「耳機錄音模式(CABLE)」沒切回，開機時自動切回喇叭（不阻塞啟動）。
+  void outputSwitch.revertIfRecord().catch(() => {});
 }
 
 main().catch((e) => {

@@ -29,7 +29,6 @@ const SOURCES: { id: AudioSourceId; label: string }[] = [
   { id: "mic", label: "🎙 麥克風" },
   { id: "local", label: "🖥️ 電腦系統" },
   { id: "webrtc", label: "📱 手機收音" },
-  { id: "bluetooth", label: "🔵 藍牙同步" },
 ];
 
 function isRealtime(state: AudioSourceState): boolean {
@@ -40,12 +39,26 @@ function isRealtime(state: AudioSourceState): boolean {
   );
 }
 
-/** 精簡控制列：狀態燈 + 來源切換 + 停止 + VU。放在頂部 header。 */
+/** 精簡控制列：狀態燈 + 來源切換 + 耳機錄音模式 + 停止 + VU。放在頂部 header。 */
 export function RouterBar() {
-  const { state, status, vu, busy, connect, activate, deactivate, syncBluetooth } = useAudioStore();
+  const { state, status, vu, busy, connect, activate, deactivate, outputMode, outputBusy, refreshOutput, setOutput } =
+    useAudioStore();
 
   // 掛載時連上 /events
   useEffect(() => connect(), [connect]);
+
+  // 掛載時讀目前預設播放裝置；並在關閉視窗時盡力把「耳機錄音模式(CABLE)」切回喇叭
+  // （sendBeacon 走 query 的簡單請求，不觸發 CORS preflight；萬一沒送到，開 App 的安全網也會補切）。
+  useEffect(() => {
+    void refreshOutput();
+    const onBeforeUnload = () => {
+      if (useAudioStore.getState().outputMode === "record") {
+        navigator.sendBeacon("http://127.0.0.1:8765/audio/output?mode=normal");
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [refreshOutput]);
 
   const active = status?.activeSourceId ?? null;
   const realtimeActive = isRealtime(state);
@@ -63,9 +76,10 @@ export function RouterBar() {
   const clock = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
 
   function onSource(id: AudioSourceId) {
-    if (id === "bluetooth") void syncBluetooth(); // 藍牙走背景同步，即時串流中也可按
-    else void activate(id);
+    void activate(id);
   }
+
+  const recordMode = outputMode === "record";
 
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -86,6 +100,26 @@ export function RouterBar() {
           </button>
         ))}
       </div>
+
+      {/* 耳機錄音模式：切系統預設輸出到 CABLE，戴 AirPods 也能錄對方；亮起=CABLE、反灰=Realtek 喇叭。
+          錄音中禁切（避免中途換裝置斷音）；停止/關 App 會自動切回喇叭。 */}
+      <button
+        onClick={() => void setOutput(recordMode ? "normal" : "record")}
+        disabled={outputBusy || realtimeActive}
+        title={
+          recordMode
+            ? "目前：耳機錄音模式（走 CABLE）。點此切回喇叭"
+            : "切到耳機錄音模式：戴 AirPods 也能錄到對方（走 CABLE）。錄音停止會自動切回喇叭"
+        }
+        className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition disabled:opacity-50 ${
+          recordMode
+            ? "border-amber-500 bg-amber-500 text-white"
+            : "border-line bg-inset text-fg-subtle hover:text-fg"
+        }`}
+      >
+        {recordMode && <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />}
+        🎧 耳機錄音模式
+      </button>
 
       {realtimeActive && (
         <button

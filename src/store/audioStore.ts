@@ -7,6 +7,7 @@ import { create } from "zustand";
 import {
   AudioSourceState,
   type AudioSourceId,
+  type OutputMode,
   type RouterStatus,
   type TranscribeLang,
   type VuLevel,
@@ -15,6 +16,8 @@ import { subscribeAudioEvents } from "../lib/audioApi";
 import {
   activateSource,
   deactivateSource,
+  getOutputStatus,
+  setOutputMode,
   syncBluetooth,
   transcribeRouterRecording,
 } from "../lib/audioRouterApi";
@@ -46,11 +49,20 @@ interface AudioStore {
   /** 自動分段：背景精修出的一段（已位移時間戳）；seq 每段遞增，前端據以接續帶入會議。 */
   autoSegment: { text: string; seq: number } | null;
 
+  /** 系統預設播放裝置模式（耳機錄音模式：record＝CABLE、normal＝喇叭）。 */
+  outputMode: OutputMode;
+  /** 切換裝置進行中（防連點）。 */
+  outputBusy: boolean;
+
   /** 連上 /events 並開始接收事件；回傳取消訂閱函式。 */
   connect: () => () => void;
   activate: (id: AudioSourceId) => Promise<void>;
   deactivate: () => Promise<void>;
   syncBluetooth: () => Promise<void>;
+  /** 讀目前預設播放裝置模式。 */
+  refreshOutput: () => Promise<void>;
+  /** 切換預設播放裝置（normal 喇叭 / record CABLE）。 */
+  setOutput: (mode: "normal" | "record") => Promise<void>;
   /** 把剛停止的收音整檔精修，回乾淨逐字稿（呼叫端負責帶入會議）。 */
   finalizeRecording: (lang: TranscribeLang) => Promise<string>;
   /** 清掉進度條（匯入/精修結束或失敗時呼叫，避免卡住）。 */
@@ -62,7 +74,7 @@ let progressStartMs = 0;
 // 自動分段序號：每來一段 +1，讓前端 effect 每段都觸發（即使文字碰巧相同）。
 let segmentSeq = 0;
 
-export const useAudioStore = create<AudioStore>((set) => ({
+export const useAudioStore = create<AudioStore>((set, get) => ({
   state: AudioSourceState.DISCONNECTED,
   status: null,
   vu: null,
@@ -75,6 +87,8 @@ export const useAudioStore = create<AudioStore>((set) => ({
   finalizing: false,
   transcribeProgress: null,
   autoSegment: null,
+  outputMode: "unknown",
+  outputBusy: false,
 
   connect: () => {
     return subscribeAudioEvents((e) => {
@@ -137,6 +151,15 @@ export const useAudioStore = create<AudioStore>((set) => ({
     try {
       const { status } = await deactivateSource();
       set({ status, state: status.state });
+      // 錄音停止 → 若還在「耳機錄音模式(CABLE)」自動切回喇叭，避免忘記切回（今天那個雷的根治）。
+      if (get().outputMode === "record") {
+        try {
+          const o = await setOutputMode("normal");
+          set({ outputMode: o.mode });
+        } catch {
+          /* 切回失敗不影響停止流程；下次開 App 的安全網也會補切 */
+        }
+      }
     } catch (err) {
       set({ error: String(err) });
     } finally {
@@ -172,4 +195,25 @@ export const useAudioStore = create<AudioStore>((set) => ({
   },
 
   clearTranscribeProgress: () => set({ transcribeProgress: null }),
+
+  refreshOutput: async () => {
+    try {
+      const o = await getOutputStatus();
+      set({ outputMode: o.mode });
+    } catch {
+      set({ outputMode: "unknown" });
+    }
+  },
+
+  setOutput: async (mode) => {
+    set({ outputBusy: true, error: null });
+    try {
+      const o = await setOutputMode(mode);
+      set({ outputMode: o.mode });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      set({ outputBusy: false });
+    }
+  },
 }));
