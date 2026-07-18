@@ -28,7 +28,9 @@ export interface AnalyzeChunkedOpts {
 // 6000 字以內單次分析；超過切 5000 字/段（中文約 1~1.6 token/字，留安全邊際壓在 Groq 12000 TPM 內）。
 const SINGLE_MAX_CHARS = 6000;
 const CHUNK_CHARS = 5000;
-const CONCURRENCY = 3;
+// map 並行段數。實測一段 5000 字 ≈ 4.5k tokens：2 段並行 ≈ 9k < 12000 TPM 守得住；
+// 3 段並行 ≈ 13.5k 會瞬間撞破 Groq 每分鐘上限（Gemini 一被限流整批落到 Groq 時）。故壓在 2。
+const CONCURRENCY = 2;
 
 /** 依行邊界把長逐字稿切成 ≤maxChars 的段（不切斷 `[mm:ss]` 行）。 */
 export function splitTranscript(text: string, maxChars: number): string[] {

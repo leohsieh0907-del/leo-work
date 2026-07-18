@@ -409,35 +409,72 @@ export class GroqLlmService implements LlmService {
   }
 }
 
-/** 呼叫 Groq 並對 5xx/429 短退避重試（後援自身過載就放手由上層回報）。 */
-async function fetchGroqWithRetry(apiKey: string, body: unknown, retries = 2): Promise<Response> {
-  const transient = new Set([429, 500, 502, 503, 504]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// TPM 窗口恆 <60s；建議等待超過此值視為每日上限，直接交上層回報、不空轉。
+const RATE_LIMIT_MAX_WAIT_MS = 30000;
+const OVERLOAD = new Set([500, 502, 503, 504]);
+
+/**
+ * 從 Groq 429 回應解析建議重試毫秒數：優先讀訊息「try again in Ns」（精確到小數），
+ * 否則讀 `retry-after` 標頭（秒）。無則 null。用 clone 讀 body，不消費原 Response。
+ */
+export async function parseGroqRetryMs(resp: Response): Promise<number | null> {
+  const data = (await resp.clone().json().catch(() => null)) as
+    | { error?: { message?: string } }
+    | null;
+  const m = /try again in\s*([\d.]+)\s*s/i.exec(data?.error?.message ?? "");
+  if (m) return Math.ceil(parseFloat(m[1]) * 1000);
+  const header = resp.headers.get("retry-after");
+  const secs = header ? parseFloat(header) : NaN;
+  return Number.isFinite(secs) ? Math.ceil(secs * 1000) : null;
+}
+
+/**
+ * 對暫時性失敗退避重試：5xx 短退避；429 依 Groq 建議的重試秒數等待
+ * （TPM 每分鐘窗口，短等待就等它過去再試一次；每日上限則交上層回報不空轉）。
+ * jitter 避免並發的多段重試在同一刻再次撞窗。
+ */
+async function retryTransient(attempt: number, retries: number, resp: Response): Promise<boolean> {
+  if (resp.ok || attempt >= retries) return false;
+  if (OVERLOAD.has(resp.status)) {
+    await sleep(700 * (attempt + 1));
+    return true;
+  }
+  if (resp.status === 429) {
+    const waitMs = await parseGroqRetryMs(resp);
+    if (waitMs !== null && waitMs > RATE_LIMIT_MAX_WAIT_MS) return false; // 每日上限 → 放手
+    const delay = waitMs !== null ? waitMs + 500 : 1500 * (attempt + 1);
+    await sleep(delay + Math.floor(Math.random() * 400));
+    return true;
+  }
+  return false;
+}
+
+/** 呼叫 Groq chat/completions，暫時性失敗退避重試。 */
+async function fetchGroqWithRetry(apiKey: string, body: unknown, retries = 3): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     const resp = await fetch(GROQ_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     });
-    if (!transient.has(resp.status) || attempt >= retries) return resp;
-    await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+    if (!(await retryTransient(attempt, retries, resp))) return resp;
   }
 }
 
-/** Groq Whisper 轉錄：multipart 上傳，對 5xx/429 短退避重試（每次重建 FormData 以免 body 已被消費）。 */
+/** Groq Whisper 轉錄：multipart 上傳，暫時性失敗退避重試（每次重建 FormData 以免 body 已被消費）。 */
 async function fetchGroqSttWithRetry(
   url: string,
   apiKey: string,
   makeForm: () => FormData,
-  retries = 2,
+  retries = 3,
 ): Promise<Response> {
-  const transient = new Set([429, 500, 502, 503, 504]);
   for (let attempt = 0; ; attempt++) {
     const resp = await fetch(url, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` }, // 不手動設 Content-Type，讓 fetch 自帶 multipart boundary
       body: makeForm(),
     });
-    if (!transient.has(resp.status) || attempt >= retries) return resp;
-    await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+    if (!(await retryTransient(attempt, retries, resp))) return resp;
   }
 }
