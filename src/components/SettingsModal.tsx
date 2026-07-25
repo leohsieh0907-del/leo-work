@@ -11,8 +11,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [groqKey, setGroqKey] = useState("");
   const [provider, setProvider] = useState("ollama");
   const [model, setModel] = useState("");
+  const [autoSegMin, setAutoSegMin] = useState(3); // 錄音自動分段間隔（分）
   const [saving, setSaving] = useState(false);
   const [savedNeedRestart, setSavedNeedRestart] = useState(false);
+  const [savedOk, setSavedOk] = useState(false); // 即時生效（不必重啟）時的已儲存提示
   const [error, setError] = useState<string | null>(null);
 
   // 版本與更新
@@ -27,6 +29,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         setStatus(s);
         setProvider(s.llmProvider);
         setModel(s.geminiModel ?? "");
+        setAutoSegMin(s.autoSegmentMinutes ?? 3);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
@@ -34,20 +37,24 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   async function handleSave() {
     setSaving(true);
     setError(null);
+    setSavedOk(false);
     try {
       const update: {
         geminiApiKey?: string;
         groqApiKey?: string;
         llmProvider?: string;
         geminiModel?: string;
+        autoSegmentMinutes?: number;
       } = {
         llmProvider: provider,
         geminiModel: model,
+        autoSegmentMinutes: autoSegMin,
       };
       if (geminiKey.trim()) update.geminiApiKey = geminiKey.trim(); // 留空＝不變更既有金鑰
       if (groqKey.trim()) update.groqApiKey = groqKey.trim();
       const r = await saveConfig(update);
       setSavedNeedRestart(r.restartRequired);
+      setSavedOk(!r.restartRequired); // 沒要求重啟＝即時生效，給個已儲存提示
       setGeminiKey("");
       setGroqKey("");
       setStatus(await getConfig());
@@ -203,6 +210,24 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           placeholder="gemini-2.5-flash"
           className={`mb-4 ${inputCls}`}
         />
+
+        <label className="mb-1 block text-sm text-fg-muted">錄音自動分段間隔</label>
+        <select
+          value={autoSegMin}
+          onChange={(e) => setAutoSegMin(Number(e.target.value))}
+          className={`mb-1 ${inputCls}`}
+        >
+          <option value={3}>每 3 分鐘</option>
+          <option value={5}>每 5 分鐘</option>
+          <option value={10}>每 10 分鐘</option>
+        </select>
+        <p className="mb-4 text-xs text-fg-faint">
+          錄音超過此長度就每隔一段自動精修轉錄、接回逐字稿（收音不中斷）。間隔越短逐字稿更新越快，接縫小誤差略多。儲存後即時生效、不必重啟。
+        </p>
+
+        {savedOk && !savedNeedRestart && (
+          <p className="mb-3 text-sm text-emerald-400">已儲存 ✓（即時生效）</p>
+        )}
 
         {savedNeedRestart ? (
           <div className="flex items-center gap-3 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm">

@@ -236,6 +236,7 @@ export interface ConfigStatus {
   hasGroqKey: boolean;
   llmProvider: string;
   geminiModel?: string;
+  autoSegmentMinutes: number; // 錄音自動分段間隔（分）
 }
 
 /** 設定更新（POST /config）。空字串＝清除該設定。 */
@@ -244,6 +245,7 @@ export interface ConfigUpdate {
   groqApiKey?: string;
   llmProvider?: string;
   geminiModel?: string;
+  autoSegmentMinutes?: number; // 錄音自動分段間隔（分）；即時套用不必重啟
 }
 
 // ════════════════ 雙源收音：跨邊界 DTO（前端 + sidecar 共用）════════════════

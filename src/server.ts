@@ -257,6 +257,8 @@ const audioRouter = new AudioIngestionRouter({
   agc: new Agc(),
   transcriber: routerTranscriber,
   onEvent: broadcast,
+  // 錄音自動分段間隔（分）：由設定畫面調整，寫進 config.json 的 AUTO_SEGMENT_MINUTES；預設 3 分。
+  autoSegmentSeconds: (Number(process.env.AUTO_SEGMENT_MINUTES) || 3) * 60,
 });
 
 // 自動分段：錄音累積達門檻(45 分) → router 觸發 → **同步** drain 這段（收音不中斷、不掉音）→
@@ -330,14 +332,35 @@ app.post("/shutdown", (_req, res) => {
 app.post(
   "/config",
   wrap(async (req, res) => {
-    const { geminiApiKey, groqApiKey, llmProvider, geminiModel } = req.body as ConfigUpdate;
+    const { geminiApiKey, groqApiKey, llmProvider, geminiModel, autoSegmentMinutes } =
+      req.body as ConfigUpdate;
     const patch: Record<string, string | undefined> = {};
-    if (geminiApiKey !== undefined) patch.GEMINI_API_KEY = geminiApiKey.trim();
-    if (groqApiKey !== undefined) patch.GROQ_API_KEY = groqApiKey.trim();
-    if (llmProvider !== undefined) patch.LLM_PROVIDER = llmProvider;
-    if (geminiModel !== undefined) patch.GEMINI_MODEL = geminiModel.trim();
+    let restartRequired = false;
+    if (geminiApiKey !== undefined) {
+      patch.GEMINI_API_KEY = geminiApiKey.trim();
+      restartRequired = true;
+    }
+    if (groqApiKey !== undefined) {
+      patch.GROQ_API_KEY = groqApiKey.trim();
+      restartRequired = true;
+    }
+    if (llmProvider !== undefined && llmProvider !== process.env.LLM_PROVIDER) {
+      patch.LLM_PROVIDER = llmProvider;
+      restartRequired = true;
+    }
+    if (geminiModel !== undefined && geminiModel.trim() !== (process.env.GEMINI_MODEL ?? "")) {
+      patch.GEMINI_MODEL = geminiModel.trim();
+      restartRequired = true;
+    }
+    // 錄音自動分段間隔：即時套用到運行中的 router（不必重啟），並持久化。
+    if (autoSegmentMinutes !== undefined) {
+      const m = Math.min(60, Math.max(1, Math.round(autoSegmentMinutes)));
+      patch.AUTO_SEGMENT_MINUTES = String(m);
+      process.env.AUTO_SEGMENT_MINUTES = String(m);
+      audioRouter.setAutoSegmentSeconds(m * 60);
+    }
     updateRuntimeConfig(patch);
-    res.json({ ok: true, restartRequired: true });
+    res.json({ ok: true, restartRequired });
   }),
 );
 

@@ -129,8 +129,8 @@ export class AudioIngestionRouter {
    * server 應在此**同步** drainRecordingWav() 取走該段，再背景精修＋broadcast，收音期間不中斷。
    */
   onSegmentReady?: () => void;
-  /** 自動分段門檻（樣本數）；由 deps.autoSegmentSeconds 覆寫，預設 AUTO_SEGMENT_SECONDS。 */
-  private readonly autoSegmentSamples: number;
+  /** 自動分段門檻（樣本數）；由 deps.autoSegmentSeconds 覆寫，預設 AUTO_SEGMENT_SECONDS；可執行期改。 */
+  private autoSegmentSamples: number;
 
   /** 每個來源是否已綁定 onDataReceived/onError（避免重複註冊）。 */
   private readonly wiredSources = new WeakSet<AudioSource>();
@@ -147,6 +147,11 @@ export class AudioIngestionRouter {
     this.wire(deps.local);
     this.wire(deps.mic);
     this.wire(deps.bluetooth);
+  }
+
+  /** 執行期調整自動分段門檻（秒）；設定畫面改間隔時即時套用，不必重啟。 */
+  setAutoSegmentSeconds(sec: number): void {
+    this.autoSegmentSamples = Math.max(1, Math.round(sec * TARGET_SAMPLE_RATE));
   }
 
   /**

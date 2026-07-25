@@ -106,11 +106,13 @@ export function getRuntimeConfigStatus(): {
   hasGroqKey: boolean;
   llmProvider: string;
   geminiModel?: string;
+  autoSegmentMinutes: number;
 } {
   return {
     hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     hasGroqKey: Boolean(process.env.GROQ_API_KEY), // Groq 後援（過載時接手文字任務）
     llmProvider: process.env.LLM_PROVIDER ?? "ollama",
     geminiModel: process.env.GEMINI_MODEL,
+    autoSegmentMinutes: Number(process.env.AUTO_SEGMENT_MINUTES) || 3, // 錄音自動分段間隔（分）
   };
 }
