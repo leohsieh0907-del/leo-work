@@ -59,8 +59,9 @@ const MAX_RECORD_SECONDS = 3600; // 60 分鐘（硬上限；設了 onSegmentRead
 const MAX_RECORD_SAMPLES = MAX_RECORD_SECONDS * TARGET_SAMPLE_RATE;
 
 // 自動分段門檻（秒）預設：錄到這個長度就「背景抽取」——drain 目前緩衝交整檔精修、緩衝清空繼續收音，
-// 使用者不必自己停。留 15 分安全邊際在 60 分硬上限前，且每段精修量適中（不過久/不易撞限流）。可由 deps 覆寫。
-const AUTO_SEGMENT_SECONDS = 2700; // 45 分鐘
+// 使用者不必自己停。設 3 分鐘：長會議時逐字稿每 3 分一段段長出來（精修過的正式文字，非即時預覽），
+// 短錄音(<3 分)不受影響；代價是接縫處偶有少數字誤差、轉錄請求數變多（總音訊量不變、費用不變）。可由 deps 覆寫。
+const AUTO_SEGMENT_SECONDS = 180; // 3 分鐘
 
 /**
  * 前景即時源 flush 轉寫器的週期上限（秒）。
