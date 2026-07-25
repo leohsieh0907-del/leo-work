@@ -11,30 +11,18 @@ interface AnalysisPanelProps {
   loading: boolean;
 }
 
-export default function AnalysisPanel({
+/** 分析結果內容（主題／摘要／衝突／行動方針）——供單場面板與各段獨立卡片共用同一份渲染。 */
+export function AnalysisBody({
   analysis,
   actionItems,
   historicalContext,
-  loading,
-}: AnalysisPanelProps) {
-  if (loading) {
-    return (
-      <section className="flex h-full items-center justify-center text-sm text-fg-subtle">
-        AI 分析中…（橫向比對歷史背景）
-      </section>
-    );
-  }
-
-  if (!analysis) {
-    return (
-      <section className="flex h-full items-center justify-center text-center text-sm text-fg-faint">
-        貼上逐字稿後按「分析」，這裡會顯示主題摘要、歷史衝突與行動方針。
-      </section>
-    );
-  }
-
+}: {
+  analysis: ProactiveAnalysis;
+  actionItems: ActionItem[];
+  historicalContext?: string;
+}) {
   return (
-    <section className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex flex-col gap-4">
       {/* 會議主題 */}
       <div>
         <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-faint">會議主題</h3>
@@ -106,7 +94,7 @@ export default function AnalysisPanel({
       </div>
 
       {/* 採用的歷史背景（除錯/透明度） */}
-      {historicalContext.trim() && (
+      {historicalContext?.trim() && (
         <details className="rounded-lg border border-line bg-brand-panel/60 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-fg-subtle">
             本次比對採用的歷史背景
@@ -116,6 +104,35 @@ export default function AnalysisPanel({
           </pre>
         </details>
       )}
+    </div>
+  );
+}
+
+export default function AnalysisPanel({
+  analysis,
+  actionItems,
+  historicalContext,
+  loading,
+}: AnalysisPanelProps) {
+  if (loading) {
+    return (
+      <section className="flex h-full items-center justify-center text-sm text-fg-subtle">
+        AI 分析中…（橫向比對歷史背景）
+      </section>
+    );
+  }
+
+  if (!analysis) {
+    return (
+      <section className="flex h-full items-center justify-center text-center text-sm text-fg-faint">
+        貼上逐字稿後按「分析」，這裡會顯示主題摘要、歷史衝突與行動方針。
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex h-full flex-col overflow-y-auto pr-1">
+      <AnalysisBody analysis={analysis} actionItems={actionItems} historicalContext={historicalContext} />
     </section>
   );
 }

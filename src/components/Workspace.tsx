@@ -13,12 +13,18 @@ import {
   type TranscribeLang,
   type TranscriptSegment,
 } from "../shared/types";
-import { filterTranscriptByRange, lastMinuteOf } from "../shared/transcriptRange";
+import {
+  filterTranscriptByRanges,
+  formatRanges,
+  lastMinuteOf,
+  parseRanges,
+} from "../shared/transcriptRange";
 import { useAudioStore } from "../store/audioStore";
 
 import HistoryRail from "./HistoryRail";
 import TranscriptPanel from "./TranscriptPanel";
 import AnalysisPanel from "./AnalysisPanel";
+import SegmentedAnalysisPanel, { type SegmentResult } from "./SegmentedAnalysisPanel";
 import ChatAssistant from "./ChatAssistant";
 
 /** 把 [mm:ss] 解析成秒數；非法格式回傳 null。 */
@@ -111,9 +117,11 @@ export default function Workspace() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   // 指定時段分析：只把某幾分鐘的逐字稿送去分析（省 token、不撞額度）。
   const [rangeOn, setRangeOn] = useState(false);
-  const [startMin, setStartMin] = useState("0");
-  const [endMin, setEndMin] = useState("15");
-  const [analyzedRange, setAnalyzedRange] = useState<string | null>(null); // 顯示本次分析涵蓋的時段
+  const [rangeText, setRangeText] = useState("0-15"); // 時段，支援多段：5-15 或 1-3, 5-7, 10-12
+  const [rangeMode, setRangeMode] = useState<"merge" | "split">("merge"); // 合併一份 / 各段各一份
+  const [analyzedRange, setAnalyzedRange] = useState<string | null>(null); // 合併/單段時顯示涵蓋時段
+  const [segments, setSegments] = useState<SegmentResult[] | null>(null); // 各段獨立分析結果
+  const [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
@@ -308,16 +316,11 @@ export default function Workspace() {
     return true;
   }
 
-  // 快捷：依逐字稿長度算出「前 N 分」/「最後 N 分」的起迄。
+  // 快捷：依逐字稿長度把時段填成「前 30 分」/「最後 15 分」。
   function applyPreset(kind: "first30" | "last15") {
     const last = lastMinuteOf(transcript);
-    if (kind === "first30") {
-      setStartMin("0");
-      setEndMin(String(Math.min(29, last)));
-    } else {
-      setStartMin(String(Math.max(0, last - 14)));
-      setEndMin(String(last));
-    }
+    if (kind === "first30") setRangeText(`0-${Math.min(29, last)}`);
+    else setRangeText(`${Math.max(0, last - 14)}-${last}`);
   }
 
   async function handleAnalyze() {
@@ -325,38 +328,102 @@ export default function Workspace() {
       setAnalyzeError("請先輸入逐字稿");
       return;
     }
-    let toAnalyze = transcript;
-    let rangeLabel: string | null = null;
-    if (rangeOn) {
-      const s = parseInt(startMin, 10);
-      const e = parseInt(endMin, 10);
-      if (!Number.isFinite(s) || !Number.isFinite(e) || s < 0 || e < s) {
-        setAnalyzeError("請輸入正確的時段（起 ≤ 迄，且 ≥ 0 分）");
-        return;
+
+    // 不指定時段：整份分析（原行為）
+    if (!rangeOn) {
+      setAnalyzing(true);
+      setAnalyzeError(null);
+      try {
+        const r = await analyze({ currentTranscript: transcript, useHistory: true });
+        setAnalysis(r.analysis);
+        setActionItems(r.actionItems);
+        setHistoricalContext(r.historicalContext);
+        setAnalyzedRange(null);
+        setSegments(null);
+      } catch (e) {
+        setAnalyzeError(e instanceof Error ? e.message : "分析失敗");
+        setAnalysis(null);
+        setActionItems([]);
+        setHistoricalContext("");
+        setAnalyzedRange(null);
+        setSegments(null);
+      } finally {
+        setAnalyzing(false);
       }
-      toAnalyze = filterTranscriptByRange(transcript, s, e);
+      return;
+    }
+
+    const ranges = parseRanges(rangeText);
+    if (ranges.length === 0) {
+      setAnalyzeError("請輸入時段，例如 5-15 或 1-3, 5-7, 10-12");
+      return;
+    }
+    setAnalyzeError(null);
+
+    // 合併一份：多段聯集 → 一次分析（右側單一面板）
+    if (rangeMode === "merge") {
+      const toAnalyze = filterTranscriptByRanges(transcript, ranges);
       if (!toAnalyze.trim()) {
-        setAnalyzeError(`第 ${s}–${e} 分內沒有逐字稿`);
+        setAnalyzeError("這些時段內沒有逐字稿");
         return;
       }
-      rangeLabel = `${s}–${e} 分`;
+      setAnalyzing(true);
+      try {
+        const r = await analyze({ currentTranscript: toAnalyze, useHistory: true });
+        setAnalysis(r.analysis);
+        setActionItems(r.actionItems);
+        setHistoricalContext(r.historicalContext);
+        setAnalyzedRange(`${formatRanges(ranges)}（合併）`);
+        setSegments(null);
+      } catch (e) {
+        setAnalyzeError(e instanceof Error ? e.message : "分析失敗");
+        setAnalysis(null);
+        setActionItems([]);
+        setHistoricalContext("");
+        setAnalyzedRange(null);
+        setSegments(null);
+      } finally {
+        setAnalyzing(false);
+      }
+      return;
+    }
+
+    // 各段各一份：逐段依序分析（不對 API 灌爆）；中途失敗保留已完成的段
+    const valid = ranges.filter(([lo, hi]) => filterTranscriptByRanges(transcript, [[lo, hi]]).trim());
+    if (valid.length === 0) {
+      setAnalyzeError("這些時段內沒有逐字稿");
+      return;
     }
     setAnalyzing(true);
-    setAnalyzeError(null);
+    setAnalysis(null);
+    setActionItems([]);
+    setAnalyzedRange(null);
+    setSegments(null);
+    setAnalyzeProgress({ done: 0, total: valid.length });
+    const results: SegmentResult[] = [];
     try {
-      const r = await analyze({ currentTranscript: toAnalyze, useHistory: true });
-      setAnalysis(r.analysis);
-      setActionItems(r.actionItems);
-      setHistoricalContext(r.historicalContext);
-      setAnalyzedRange(rangeLabel);
+      for (let i = 0; i < valid.length; i++) {
+        const [lo, hi] = valid[i];
+        const seg = filterTranscriptByRanges(transcript, [[lo, hi]]);
+        const r = await analyze({ currentTranscript: seg, useHistory: true });
+        results.push({
+          label: lo === hi ? `${lo} 分` : `${lo}–${hi} 分`,
+          analysis: r.analysis,
+          actionItems: r.actionItems,
+        });
+        setAnalyzeProgress({ done: i + 1, total: valid.length });
+      }
+      setSegments(results);
     } catch (e) {
-      setAnalyzeError(e instanceof Error ? e.message : "分析失敗");
-      setAnalysis(null);
-      setActionItems([]);
-      setHistoricalContext("");
-      setAnalyzedRange(null);
+      if (results.length > 0) {
+        setSegments(results); // 已完成的段照常顯示
+        setAnalyzeError("部分時段分析失敗，已顯示成功的段：" + (e instanceof Error ? e.message : ""));
+      } else {
+        setAnalyzeError(e instanceof Error ? e.message : "分析失敗");
+      }
     } finally {
       setAnalyzing(false);
+      setAnalyzeProgress(null);
     }
   }
 
@@ -407,6 +474,8 @@ export default function Workspace() {
     setAnalysis(m.analysis);
     setActionItems(m.actionItems ?? []);
     setHistoricalContext("");
+    setAnalyzedRange(null);
+    setSegments(null);
     setSaveMsg(null);
     setSaveError(null);
     setAnalyzeError(null);
@@ -419,15 +488,20 @@ export default function Workspace() {
     lastPersistedRef.current = m.transcript; // 剛載入＝已存狀態
   }
 
-  function handleNew() {
+  async function handleNew() {
     if (!confirmSwitch()) return;
+    const id = newMeetingId();
+    const title = defaultMeetingId();
+    const date = defaultMeetingDate();
     setTranscript("");
-    setMeetingId(newMeetingId());
-    setMeetingTitle(defaultMeetingId());
-    setMeetingDate(defaultMeetingDate());
+    setMeetingId(id);
+    setMeetingTitle(title);
+    setMeetingDate(date);
     setAnalysis(null);
     setActionItems([]);
     setHistoricalContext("");
+    setAnalyzedRange(null);
+    setSegments(null);
     setSaveMsg(null);
     setSaveError(null);
     setAnalyzeError(null);
@@ -437,6 +511,22 @@ export default function Workspace() {
       setSpeakerMap({});
     }
     lastPersistedRef.current = "";
+    // 立刻把這場空會議落地到歷史欄 → 可先選它、再按收音，錄音就綁定到這場（不會寫回別場）。
+    try {
+      const isoDate = new Date(`${date}T12:00:00`).toISOString();
+      await persistMeeting({
+        id,
+        title,
+        date: isoDate,
+        transcript: "",
+        analysis: null,
+        actionItems: [],
+        savedAt: new Date().toISOString(),
+      });
+      setHistoryKey((k) => k + 1);
+    } catch {
+      // 建立空會議失敗不阻斷：仍可錄音/編修後手動存檔
+    }
   }
 
   /** 歷史欄改名後同步：若改的是目前開啟的會議，更新顯示名。 */
@@ -479,6 +569,14 @@ export default function Workspace() {
           </label>
 
           <div className="ml-auto flex items-center gap-2">
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-sm text-fg-muted">
+              <input
+                type="checkbox"
+                checked={rangeOn}
+                onChange={(e) => setRangeOn(e.target.checked)}
+              />
+              ⏱ 指定時段
+            </label>
             <button
               onClick={handleSave}
               disabled={saving}
@@ -495,53 +593,54 @@ export default function Workspace() {
             </button>
           </div>
 
-          {/* 指定時段分析：只分析某幾分鐘（省 token、避免長逐字稿撞額度） */}
-          <div className="flex w-full flex-wrap items-center gap-2 text-sm text-fg-muted">
-            <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          {/* 指定時段分析：勾選才展開（不佔常駐高度）。單段 5-15；多段 1-3, 5-7, 10-12。 */}
+          {rangeOn && (
+            <div className="flex w-full flex-wrap items-center gap-2 text-sm text-fg-muted">
+              <span>只分析</span>
               <input
-                type="checkbox"
-                checked={rangeOn}
-                onChange={(e) => setRangeOn(e.target.checked)}
+                type="text"
+                value={rangeText}
+                onChange={(e) => setRangeText(e.target.value)}
+                placeholder="例如 5-15 或 1-3, 5-7, 10-12"
+                className="w-56 rounded-md border border-line bg-brand-dark/60 px-2 py-1 text-fg outline-none focus:border-brand"
               />
-              ⏱ 指定時段分析
-            </label>
-            {rangeOn && (
-              <>
-                <span>第</span>
+              <span>分</span>
+              <button
+                type="button"
+                onClick={() => applyPreset("first30")}
+                className="rounded border border-line px-2 py-1 text-xs transition hover:bg-hover-weak"
+              >
+                前 30 分
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset("last15")}
+                className="rounded border border-line px-2 py-1 text-xs transition hover:bg-hover-weak"
+              >
+                最後 15 分
+              </button>
+              <span className="mx-1 text-fg-faint">·</span>
+              <span>輸出</span>
+              <label className="flex cursor-pointer items-center gap-1">
                 <input
-                  type="number"
-                  min={0}
-                  value={startMin}
-                  onChange={(e) => setStartMin(e.target.value)}
-                  className="w-16 rounded-md border border-line bg-brand-dark/60 px-2 py-1 text-fg outline-none focus:border-brand"
+                  type="radio"
+                  name="rangeMode"
+                  checked={rangeMode === "merge"}
+                  onChange={() => setRangeMode("merge")}
                 />
-                <span>分 ～</span>
+                合併一份
+              </label>
+              <label className="flex cursor-pointer items-center gap-1">
                 <input
-                  type="number"
-                  min={0}
-                  value={endMin}
-                  onChange={(e) => setEndMin(e.target.value)}
-                  className="w-16 rounded-md border border-line bg-brand-dark/60 px-2 py-1 text-fg outline-none focus:border-brand"
+                  type="radio"
+                  name="rangeMode"
+                  checked={rangeMode === "split"}
+                  onChange={() => setRangeMode("split")}
                 />
-                <span>分</span>
-                <button
-                  type="button"
-                  onClick={() => applyPreset("first30")}
-                  className="rounded border border-line px-2 py-1 text-xs transition hover:bg-hover-weak"
-                >
-                  前 30 分
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyPreset("last15")}
-                  className="rounded border border-line px-2 py-1 text-xs transition hover:bg-hover-weak"
-                >
-                  最後 15 分
-                </button>
-                <span className="text-xs text-fg-faint">（只分析這段，省額度）</span>
-              </>
-            )}
-          </div>
+                各段各一份
+              </label>
+            </div>
+          )}
 
           {saveMsg && <p className="w-full text-xs text-brand-accent">{saveMsg}</p>}
           {saveError && <p className="w-full text-xs text-brand-danger">{saveError}</p>}
@@ -638,15 +737,24 @@ export default function Workspace() {
           <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-brand-panel/40 p-4">
             {analyzeError && <p className="mb-2 text-xs text-brand-danger">{analyzeError}</p>}
             {analyzedRange && (
-              <p className="mb-2 text-xs text-brand-accent">🕒 本次分析範圍：第 {analyzedRange}</p>
+              <p className="mb-2 text-xs text-brand-accent">🕒 本次分析範圍：{analyzedRange}</p>
+            )}
+            {analyzing && analyzeProgress && (
+              <p className="mb-2 text-xs text-fg-subtle">
+                各段分析中… {analyzeProgress.done}/{analyzeProgress.total} 段
+              </p>
             )}
             <div className="min-h-0 flex-1">
-              <AnalysisPanel
-                analysis={analysis}
-                actionItems={actionItems}
-                historicalContext={historicalContext}
-                loading={analyzing}
-              />
+              {segments ? (
+                <SegmentedAnalysisPanel segments={segments} title={meetingTitle} date={meetingDate} />
+              ) : (
+                <AnalysisPanel
+                  analysis={analysis}
+                  actionItems={actionItems}
+                  historicalContext={historicalContext}
+                  loading={analyzing}
+                />
+              )}
             </div>
           </div>
         </div>
