@@ -499,3 +499,36 @@
 - Phase 4 UI 美化：等庭晰指畫面具體要調哪裡。
 - 之後若要上 GitHub：建私有 repo「Leo-work」+ 放行 token → 加乾淨 remote + push（步驟見上）。
 - 「存對話」流程：庭晰說「存對話」→ 我 append 此檔一筆 → 庭晰 `/clear`。
+
+---
+
+## 2026-07-25 — Groq TPM 修正 + 指定時段分析(多段 A+B) + 錄音自動分段可調（v0.1.25～0.1.29）
+
+> 註：worklog 中間幾版（0.1.15~0.1.24）未逐筆記錄；本筆補這輪 session 的一連串改動。
+
+### 這段做了什麼
+1. **v0.1.25 — Groq 12000 TPM 硬牆修正**：143 分長逐字稿按「分析」時 Gemini 被限流轉 Groq → 集體撞破每分鐘 token 上限，且重試等太短(2.1s < 建議 7.79s)就直接報錯。
+   - `analyzePipeline.ts` map 並行段數 `3→2`（一段 ~4.5k tokens，2 段並行 ~9k 守得住 12000 TPM）。
+   - `GroqLlmService` 429 改讀 Groq 建議秒數「try again in Ns」（比照 Gemini `parse429RetryMs`）：短等待就等它過去再試、每日上限放手交上層；抽共用 `parseGroqRetryMs`/`retryTransient`。+5 回歸測試。
+2. **v0.1.26 — 指定時段分析（單段）**：分析可只跑某幾分鐘。`shared/transcriptRange.ts` 純函式依 `[分:秒]` 前端過濾後才送 `/analyze`（後端零改）。⏱勾選 + 起迄分鐘 + 前30/最後15快捷。
+3. **v0.1.27 — 多段 A+B + 兩個 UX 修正**：
+   - 多段輸入 `1-3, 5-7, 10-12`（`parseRanges/filterTranscriptByRanges/formatRanges`）。
+   - 輸出兩模式(radio)：**合併一份**(聯集→單次) / **各段各一份**(逐段→`SegmentedAnalysisPanel` 可摺疊卡片、每段可匯出 Word；`AnalysisPanel` 拆出 `AnalysisBody` 共用渲染)。
+   - `handleNew` 按下即把空會議加密落地歷史欄（可先選它再錄音，避免錄音 origin 寫回別場）。
+   - 逐字稿框變小修正：⏱勾選框收進「存檔/分析」按鈕列，輸入只在勾選時展開（不佔常駐高度）。
+4. **v0.1.28 — 錄音自動分段門檻 45→3 分**：長會議逐字稿每 3 分一段段長出來（精修文字、非即時預覽）。
+5. **v0.1.29 — 自動分段間隔做成可調設定**：⚙️設定「錄音自動分段間隔」3/5/10 分。`AUTO_SEGMENT_MINUTES` 進 `config.json`；`AudioIngestionRouter.setAutoSegmentSeconds()` 執行期 setter，POST `/config` 即時套用**不必重啟**；`ConfigStatus/ConfigUpdate` 加 `autoSegmentMinutes`，`restartRequired` 改成只有金鑰/來源/模型實際變更才 true。
+
+### 關鍵決定 / 事實
+- **鐵則（接已知雷 #15）**：吃整份逐字稿的新文字功能都要先分段/選取，別整份丟。
+- 費用釐清：轉錄無可取代（**Claude API 不能語音轉錄**、即時逐字稿是 Gemini 專屬）→ Gemini 當主力最合適，Claude 只適合當「分析品質升級」加值；免費層每日額度用完＝配額天花板非 bug，解＝等重置/換帳號金鑰/開付費。
+- 已裝新 Groq 帳號金鑰（`config.json` + 金鑰.txt 備份）；Gemini 第二把使用者貼成 OAuth 碼(`AQ.…`)非 API key，待補真 `AIzaSy`。
+- 分段間隔權衡：短→更新快但接縫誤差多、請求數多；費用不變（總音訊量一樣）。
+
+### 目前狀態
+- 雙 typecheck + **vitest 152 全過** + vite build 通過。
+- **v0.1.29 已發佈上線 OTA**（GitHub Releases，OTA 端點回 0.1.29）。skill 已更新並 push claude-skills-backup。
+
+### 待辦 / 下一步（未做）
+- Gemini 第二把金鑰（正確 `AIzaSy`）待補；或考慮開 Gemini 付費（估約 NT$150/月）。
+- 各裝置開 App 會自動 OTA 到 0.1.29。會議資料在 `%APPDATA%\com.leowork.desktop\`，更新不影響。
